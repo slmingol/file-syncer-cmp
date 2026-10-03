@@ -202,6 +202,7 @@ func cmdCompare(args []string) {
 	format := fs.String("format", "text", "output format: text, json, html")
 	doHash := fs.Bool("hash", false, "also compare hashes (both indexes must have hashes)")
 	doFuzzy := fs.Bool("fuzzy", false, "fuzzy name match: treat dest file as found if src name is substring of dest name")
+	ignoreFlag := fs.String("ignore", "", "comma-separated filename globs to exclude from missing (e.g. 'RARBG*,www.*.mp4')")
 	destFlag := fs.String("dest", "", "destination index (required when passing multiple sources)")
 
 	flagArgs, posArgs := splitArgs(args)
@@ -233,6 +234,7 @@ func cmdCompare(args []string) {
 
 	src := mergeIndexes(srcIndexes)
 	result := compare(src, dst, *doHash, *doFuzzy)
+	filterIgnored(result, *ignoreFlag)
 	printReport(result, src, dst, *format)
 }
 
@@ -243,6 +245,7 @@ func cmdSyncCheck(args []string) {
 	extList := fs.String("ext", "", "comma-separated extensions")
 	doHash := fs.Bool("hash", false, "compute and compare hashes")
 	doFuzzy := fs.Bool("fuzzy", false, "fuzzy name match: treat dest file as found if src name is substring of dest name")
+	ignoreFlag := fs.String("ignore", "", "comma-separated filename globs to exclude from missing (e.g. 'RARBG*,www.*.mp4')")
 	format := fs.String("format", "text", "output format: text, json, html")
 	workers := fs.Int("workers", 8, "parallel scan workers")
 	destFlag := fs.String("dest", "", "destination path (required when passing multiple sources)")
@@ -292,6 +295,7 @@ func cmdSyncCheck(args []string) {
 
 	src := mergeIndexes(srcIndexes)
 	result := compare(src, dst, *doHash, *doFuzzy)
+	filterIgnored(result, *ignoreFlag)
 	printReport(result, src, dst, *format)
 }
 
@@ -512,6 +516,35 @@ func compare(src, dst *Index, useHash bool, fuzzy bool) *CompareResult {
 	}
 
 	return result
+}
+
+// filterIgnored removes entries from result.Missing whose filename matches any
+// of the comma-separated glob patterns in the ignore string. Non-glob patterns
+// are treated as exact filename matches. Case-insensitive.
+func filterIgnored(result *CompareResult, ignore string) {
+	if ignore == "" {
+		return
+	}
+	patterns := strings.Split(ignore, ",")
+	for i, p := range patterns {
+		patterns[i] = strings.ToLower(strings.TrimSpace(p))
+	}
+
+	keep := result.Missing[:0]
+	for _, f := range result.Missing {
+		nameLow := strings.ToLower(f.Name)
+		matched := false
+		for _, p := range patterns {
+			if ok, _ := filepath.Match(p, nameLow); ok {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			keep = append(keep, f)
+		}
+	}
+	result.Missing = keep
 }
 
 // rsyncCommands builds deduplicated ~/rsync.sh commands for missing files,
