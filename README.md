@@ -1,27 +1,6 @@
-# file-syncer-cmp
-
-```
-╔═══════════════════════════════════════════════════════════════╗
-║  ░░░░░ ░░░░░░░ ░░░░░░░░ ░░░░░░░ ░░░░░░░ ░░░░░░░ ░░░░░░░      ║
-║                                                               ║
-║    ███████╗██╗   ██╗███╗   ██╗ ██████╗                       ║
-║    ██╔════╝╚██╗ ██╔╝████╗  ██║██╔════╝                       ║
-║    ███████╗ ╚████╔╝ ██╔██╗ ██║██║                            ║
-║    ╚════██║  ╚██╔╝  ██║╚██╗██║██║                            ║
-║    ███████║   ██║   ██║ ╚████║╚██████╗                       ║
-║    ╚══════╝   ╚═╝   ╚═╝  ╚═══╝ ╚═════╝                       ║
-║                                                               ║
-║    ██████╗ ███╗   ███╗██████╗                                 ║
-║   ██╔════╝ ████╗ ████║██╔══██╗                                ║
-║   ██║      ██╔████╔██║██████╔╝                                ║
-║   ██║      ██║╚██╔╝██║██╔═══╝                                 ║
-║   ╚██████╗ ██║ ╚═╝ ██║██║                                     ║
-║    ╚═════╝ ╚═╝     ╚═╝╚═╝                                     ║
-║                                                               ║
-║    deep media sync auditor · path-independent · zero deps    ║
-║  ░░░░░ ░░░░░░░ ░░░░░░░░ ░░░░░░░ ░░░░░░░ ░░░░░░░ ░░░░░░░      ║
-╚═══════════════════════════════════════════════════════════════╝
-```
+<p align="center">
+  <img src="assets/banner.svg" alt="file-syncer-cmp" width="900"/>
+</p>
 
 [![CI](https://github.com/slmingol/file-syncer-cmp/actions/workflows/ci.yml/badge.svg)](https://github.com/slmingol/file-syncer-cmp/actions/workflows/ci.yml)
 [![Release](https://github.com/slmingol/file-syncer-cmp/actions/workflows/release.yml/badge.svg)](https://github.com/slmingol/file-syncer-cmp/actions/workflows/release.yml)

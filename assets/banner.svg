@@ -1,0 +1,120 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="200" viewBox="0 0 900 200">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%"   stop-color="#0d1117"/>
+      <stop offset="100%" stop-color="#161b22"/>
+    </linearGradient>
+    <linearGradient id="titleGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%"   stop-color="#58d6ff"/>
+      <stop offset="50%"  stop-color="#a78bfa"/>
+      <stop offset="100%" stop-color="#f472b6"/>
+    </linearGradient>
+    <linearGradient id="barGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%"   stop-color="#58d6ff" stop-opacity="0.8"/>
+      <stop offset="100%" stop-color="#f472b6" stop-opacity="0.1"/>
+    </linearGradient>
+    <linearGradient id="scanGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%"   stop-color="#58d6ff" stop-opacity="0"/>
+      <stop offset="30%"  stop-color="#58d6ff" stop-opacity="0.06"/>
+      <stop offset="100%" stop-color="#58d6ff" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="subtleGlow">
+      <feGaussianBlur stdDeviation="1.5" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <clipPath id="bounds"><rect width="900" height="200"/></clipPath>
+  </defs>
+
+  <!-- background -->
+  <rect width="900" height="200" fill="url(#bg)" rx="10"/>
+
+  <!-- subtle dot grid -->
+  <g opacity="0.18" clip-path="url(#bounds)">
+    <pattern id="dots" x="0" y="0" width="24" height="24" patternUnits="userSpaceOnUse">
+      <circle cx="1" cy="1" r="1" fill="#58d6ff"/>
+    </pattern>
+    <rect width="900" height="200" fill="url(#dots)"/>
+  </g>
+
+  <!-- scan lines -->
+  <rect width="900" height="200" fill="url(#scanGrad)" clip-path="url(#bounds)"/>
+  <rect y="98"  width="900" height="1" fill="#58d6ff" opacity="0.06"/>
+  <rect y="100" width="900" height="1" fill="#58d6ff" opacity="0.04"/>
+
+  <!-- left accent bar -->
+  <rect x="0" y="0" width="4" height="200" fill="url(#barGrad)" rx="2" opacity="0.9"/>
+
+  <!-- top edge line -->
+  <rect x="0" y="0" width="900" height="1" fill="url(#barGrad)" opacity="0.5"/>
+
+  <!-- corner brackets -->
+  <g stroke="#58d6ff" stroke-width="1.5" fill="none" opacity="0.5">
+    <path d="M18,14 L14,14 L14,18"/>
+    <path d="M882,14 L886,14 L886,18"/>
+    <path d="M14,182 L14,186 L18,186"/>
+    <path d="M886,182 L886,186 L882,186"/>
+  </g>
+
+  <!-- decorative file-path lines left side -->
+  <g font-family="'SF Mono','Fira Code','Cascadia Code',ui-monospace,monospace" font-size="10" fill="#58d6ff" opacity="0.2">
+    <text x="28" y="48">▸ /mnt/disk1/music/</text>
+    <text x="28" y="64">▸ /mnt/disk2/movies/</text>
+    <text x="28" y="80">▸ /volume1/media/</text>
+  </g>
+
+  <!-- decorative status lines right side -->
+  <g font-family="'SF Mono','Fira Code','Cascadia Code',ui-monospace,monospace" font-size="10" text-anchor="end" opacity="0.25">
+    <text x="872" y="48" fill="#4ade80">✓ 1,804 synced</text>
+    <text x="872" y="64" fill="#f87171">✕ 3 missing</text>
+    <text x="872" y="80" fill="#fbbf24">≠ 1 mismatch</text>
+  </g>
+
+  <!-- main title -->
+  <text
+    x="450" y="112"
+    font-family="'SF Mono','Fira Code','Cascadia Code',ui-monospace,monospace"
+    font-size="52"
+    font-weight="700"
+    text-anchor="middle"
+    fill="url(#titleGrad)"
+    filter="url(#glow)"
+    letter-spacing="-1"
+  >file-syncer-cmp</text>
+
+  <!-- underline accent -->
+  <rect x="200" y="120" width="500" height="1.5" fill="url(#titleGrad)" opacity="0.4" rx="1"/>
+
+  <!-- tagline -->
+  <text
+    x="450" y="148"
+    font-family="'SF Mono','Fira Code','Cascadia Code',ui-monospace,monospace"
+    font-size="13"
+    font-weight="400"
+    text-anchor="middle"
+    fill="#8b949e"
+    letter-spacing="0.5"
+  >deep media sync auditor · path-independent · zero deps</text>
+
+  <!-- platform badges -->
+  <g font-family="'SF Mono','Fira Code','Cascadia Code',ui-monospace,monospace" font-size="10.5" font-weight="500">
+    <!-- linux/amd64 -->
+    <rect x="238" y="163" width="96" height="20" rx="3" fill="#21262d" stroke="#30363d" stroke-width="1"/>
+    <text x="286" y="177" text-anchor="middle" fill="#58d6ff">linux/amd64</text>
+    <!-- linux/arm64 -->
+    <rect x="342" y="163" width="96" height="20" rx="3" fill="#21262d" stroke="#30363d" stroke-width="1"/>
+    <text x="390" y="177" text-anchor="middle" fill="#58d6ff">linux/arm64</text>
+    <!-- darwin/amd64 -->
+    <rect x="446" y="163" width="104" height="20" rx="3" fill="#21262d" stroke="#30363d" stroke-width="1"/>
+    <text x="498" y="177" text-anchor="middle" fill="#a78bfa">darwin/amd64</text>
+    <!-- darwin/arm64 -->
+    <rect x="558" y="163" width="104" height="20" rx="3" fill="#21262d" stroke="#30363d" stroke-width="1"/>
+    <text x="610" y="177" text-anchor="middle" fill="#a78bfa">darwin/arm64</text>
+  </g>
+
+  <!-- border -->
+  <rect x="0.5" y="0.5" width="899" height="199" rx="9.5" fill="none" stroke="#30363d" stroke-width="1" opacity="0.8"/>
+</svg>
