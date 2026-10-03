@@ -23,12 +23,13 @@ var defaultExts = []string{
 }
 
 type FileRecord struct {
-	Path     string `json:"path"`
-	Name     string `json:"name"`
-	Size     int64  `json:"size"`
-	Ext      string `json:"ext"`
-	Modified int64  `json:"modified"`
-	Hash     uint64 `json:"hash,omitempty"`
+	Path        string `json:"path"`
+	Name        string `json:"name"`
+	Size        int64  `json:"size"`
+	Ext         string `json:"ext"`
+	Modified    int64  `json:"modified"`
+	Hash        uint64 `json:"hash,omitempty"`
+	SourceIndex string `json:"-"` // which index this came from (not serialized)
 }
 
 type Index struct {
@@ -37,8 +38,30 @@ type Index struct {
 	Files     []FileRecord `json:"files"`
 }
 
+// mergeIndexes combines multiple source indexes into one, tagging each file
+// with the root of the index it came from.
+func mergeIndexes(indexes []*Index) *Index {
+	if len(indexes) == 1 {
+		for i := range indexes[0].Files {
+			indexes[0].Files[i].SourceIndex = indexes[0].Root
+		}
+		return indexes[0]
+	}
+	merged := &Index{Root: "(merged)"}
+	for _, idx := range indexes {
+		if merged.ScannedAt.IsZero() || idx.ScannedAt.Before(merged.ScannedAt) {
+			merged.ScannedAt = idx.ScannedAt
+		}
+		for _, f := range idx.Files {
+			f.SourceIndex = idx.Root
+			merged.Files = append(merged.Files, f)
+		}
+	}
+	return merged
+}
+
 type CompareResult struct {
-	Missing      []FileRecord `json:"missing"`
+	Missing      []FileRecord   `json:"missing"`
 	SizeMismatch []MismatchPair `json:"size_mismatch"`
 	HashMismatch []MismatchPair `json:"hash_mismatch,omitempty"`
 }
@@ -75,21 +98,29 @@ func printUsage() {
 
 COMMANDS:
   scan         Scan a directory and produce an index file
-  compare      Compare two index files and report missing/mismatched files
-  sync-check   Scan two paths directly and compare (both must be accessible)
+  compare      Compare index files and report missing/mismatched files
+  sync-check   Scan paths directly and compare (both must be accessible)
+  version      Print version
 
 EXAMPLES:
   # On transmission server (or mount the disk):
   file-syncer-cmp scan /mnt/disk1 --output disk1.json
+  file-syncer-cmp scan /mnt/disk2 --output disk2.json
 
   # On NAS (or mount the NAS share):
   file-syncer-cmp scan /mnt/nas --output nas.json
 
-  # Compare the two indexes:
+  # Compare one source against dest:
   file-syncer-cmp compare disk1.json nas.json
+
+  # Compare multiple sources against one dest:
+  file-syncer-cmp compare --dest nas.json disk1.json disk2.json disk3.json
 
   # Or if both paths are accessible at once:
   file-syncer-cmp sync-check /mnt/disk1 /mnt/nas
+
+  # Multiple source paths:
+  file-syncer-cmp sync-check --dest /mnt/nas /mnt/disk1 /mnt/disk2
 
   # With hash verification (slower but more accurate):
   file-syncer-cmp scan /mnt/disk1 --output disk1.json --hash
@@ -99,7 +130,7 @@ EXAMPLES:
   file-syncer-cmp scan /mnt/disk1 --ext mp3,flac,mkv,mp4
 
   # HTML report:
-  file-syncer-cmp compare disk1.json nas.json --format html > report.html
+  file-syncer-cmp compare --dest nas.json disk1.json disk2.json --format html > report.html
 `)
 }
 
@@ -112,7 +143,6 @@ func cmdScan(args []string) {
 	doHash := fs.Bool("hash", false, "compute partial file hash (slower)")
 	workers := fs.Int("workers", 8, "parallel scan workers")
 
-	// Separate positional args from flags so flags work in any position.
 	flagArgs, posArgs := splitArgs(args)
 	fs.Parse(flagArgs)
 
@@ -153,18 +183,36 @@ func cmdCompare(args []string) {
 	fs := flag.NewFlagSet("compare", flag.ExitOnError)
 	format := fs.String("format", "text", "output format: text, json, html")
 	doHash := fs.Bool("hash", false, "also compare hashes (both indexes must have hashes)")
+	destFlag := fs.String("dest", "", "destination index (required when passing multiple sources)")
 
 	flagArgs, posArgs := splitArgs(args)
 	fs.Parse(flagArgs)
 
-	if len(posArgs) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: compare <source.json> <dest.json> [flags]")
+	var srcIndexes []*Index
+	var dst *Index
+
+	switch {
+	case *destFlag != "":
+		// --dest nas.json disk1.json disk2.json ...
+		if len(posArgs) < 1 {
+			fmt.Fprintln(os.Stderr, "usage: compare --dest <dest.json> <src1.json> [src2.json ...]")
+			os.Exit(1)
+		}
+		dst = loadIndex(*destFlag)
+		for _, p := range posArgs {
+			srcIndexes = append(srcIndexes, loadIndex(p))
+		}
+	case len(posArgs) == 2:
+		// legacy: compare src.json dst.json
+		srcIndexes = []*Index{loadIndex(posArgs[0])}
+		dst = loadIndex(posArgs[1])
+	default:
+		fmt.Fprintln(os.Stderr, "usage: compare <src.json> <dest.json>")
+		fmt.Fprintln(os.Stderr, "       compare --dest <dest.json> <src1.json> [src2.json ...]")
 		os.Exit(1)
 	}
 
-	src := loadIndex(posArgs[0])
-	dst := loadIndex(posArgs[1])
-
+	src := mergeIndexes(srcIndexes)
 	result := compare(src, dst, *doHash)
 	printReport(result, src, dst, *format)
 }
@@ -177,31 +225,52 @@ func cmdSyncCheck(args []string) {
 	doHash := fs.Bool("hash", false, "compute and compare hashes")
 	format := fs.String("format", "text", "output format: text, json, html")
 	workers := fs.Int("workers", 8, "parallel scan workers")
+	destFlag := fs.String("dest", "", "destination path (required when passing multiple sources)")
 
 	flagArgs, posArgs := splitArgs(args)
 	fs.Parse(flagArgs)
 
-	if len(posArgs) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: sync-check <source-path> <dest-path> [flags]")
+	exts := parseExts(*extList)
+
+	var srcPaths []string
+	var destPath string
+
+	switch {
+	case *destFlag != "":
+		if len(posArgs) < 1 {
+			fmt.Fprintln(os.Stderr, "usage: sync-check --dest <dest-path> <src1> [src2 ...]")
+			os.Exit(1)
+		}
+		destPath = *destFlag
+		srcPaths = posArgs
+	case len(posArgs) == 2:
+		srcPaths = posArgs[:1]
+		destPath = posArgs[1]
+	default:
+		fmt.Fprintln(os.Stderr, "usage: sync-check <src-path> <dest-path>")
+		fmt.Fprintln(os.Stderr, "       sync-check --dest <dest-path> <src1> [src2 ...]")
 		os.Exit(1)
 	}
 
-	exts := parseExts(*extList)
-
-	fmt.Fprintf(os.Stderr, "scanning source: %s\n", posArgs[0])
-	src, err := scan(posArgs[0], exts, *doHash, *workers)
-	if err != nil {
-		fatal(err)
+	var srcIndexes []*Index
+	for _, p := range srcPaths {
+		fmt.Fprintf(os.Stderr, "scanning source: %s\n", p)
+		idx, err := scan(p, exts, *doHash, *workers)
+		if err != nil {
+			fatal(err)
+		}
+		fmt.Fprintf(os.Stderr, "found %d files\n", len(idx.Files))
+		srcIndexes = append(srcIndexes, idx)
 	}
-	fmt.Fprintf(os.Stderr, "found %d files in source\n", len(src.Files))
 
-	fmt.Fprintf(os.Stderr, "scanning dest: %s\n", posArgs[1])
-	dst, err := scan(posArgs[1], exts, *doHash, *workers)
+	fmt.Fprintf(os.Stderr, "scanning dest: %s\n", destPath)
+	dst, err := scan(destPath, exts, *doHash, *workers)
 	if err != nil {
 		fatal(err)
 	}
 	fmt.Fprintf(os.Stderr, "found %d files in dest\n", len(dst.Files))
 
+	src := mergeIndexes(srcIndexes)
 	result := compare(src, dst, *doHash)
 	printReport(result, src, dst, *format)
 }
@@ -209,7 +278,10 @@ func cmdSyncCheck(args []string) {
 // ---------- scan implementation ----------
 
 func scan(root string, exts map[string]bool, doHash bool, workers int) (*Index, error) {
-	type job struct{ path string; info os.FileInfo }
+	type job struct {
+		path string
+		info os.FileInfo
+	}
 
 	jobs := make(chan job, 256)
 	results := make(chan FileRecord, 256)
@@ -288,18 +360,15 @@ func partialHash(path string) uint64 {
 	const chunk = 512 * 1024
 	buf := make([]byte, chunk)
 
-	// head
 	n, _ := io.ReadFull(f, buf)
 	h.Write(buf[:n])
 
-	// tail (only if file is large enough)
 	if info.Size() > chunk*2 {
 		f.Seek(-chunk, io.SeekEnd)
 		n, _ = io.ReadFull(f, buf)
 		h.Write(buf[:n])
 	}
 
-	// include size in hash to distinguish differently-sized files with same head/tail
 	var sizeBuf [8]byte
 	for i := 0; i < 8; i++ {
 		sizeBuf[i] = byte(info.Size() >> (i * 8))
@@ -312,7 +381,6 @@ func partialHash(path string) uint64 {
 // ---------- compare implementation ----------
 
 func compare(src, dst *Index, useHash bool) *CompareResult {
-	// Build dest lookup: name -> []FileRecord (multiple files may share a name)
 	byName := make(map[string][]FileRecord, len(dst.Files))
 	for _, f := range dst.Files {
 		key := strings.ToLower(f.Name)
@@ -329,7 +397,6 @@ func compare(src, dst *Index, useHash bool) *CompareResult {
 			continue
 		}
 
-		// Find exact size match
 		var sizeMatch *FileRecord
 		for i := range candidates {
 			if candidates[i].Size == sf.Size {
@@ -339,7 +406,6 @@ func compare(src, dst *Index, useHash bool) *CompareResult {
 		}
 
 		if sizeMatch == nil {
-			// Name matches but no size match - report best candidate
 			result.SizeMismatch = append(result.SizeMismatch, MismatchPair{
 				Source: sf,
 				Dest:   candidates[0],
@@ -347,7 +413,6 @@ func compare(src, dst *Index, useHash bool) *CompareResult {
 			continue
 		}
 
-		// Size matches - optionally check hash
 		if useHash && sf.Hash != 0 && sizeMatch.Hash != 0 && sf.Hash != sizeMatch.Hash {
 			result.HashMismatch = append(result.HashMismatch, MismatchPair{
 				Source: sf,
@@ -377,9 +442,24 @@ func printReport(result *CompareResult, src, dst *Index, format string) {
 func printText(result *CompareResult, src, dst *Index) {
 	w := os.Stdout
 	sep := strings.Repeat("-", 80)
+	multiSrc := src.Root == "(merged)"
 
 	fmt.Fprintf(w, "\nFILE SYNC REPORT\n%s\n", sep)
-	fmt.Fprintf(w, "Source:  %s (scanned %s, %d files)\n", src.Root, src.ScannedAt.Format("2006-01-02 15:04"), len(src.Files))
+	if multiSrc {
+		seen := map[string]bool{}
+		for _, f := range src.Files {
+			seen[f.SourceIndex] = true
+		}
+		roots := make([]string, 0, len(seen))
+		for r := range seen {
+			roots = append(roots, r)
+		}
+		sort.Strings(roots)
+		fmt.Fprintf(w, "Sources: %s\n", strings.Join(roots, ", "))
+		fmt.Fprintf(w, "         (%d files total)\n", len(src.Files))
+	} else {
+		fmt.Fprintf(w, "Source:  %s (scanned %s, %d files)\n", src.Root, src.ScannedAt.Format("2006-01-02 15:04"), len(src.Files))
+	}
 	fmt.Fprintf(w, "Dest:    %s (scanned %s, %d files)\n", dst.Root, dst.ScannedAt.Format("2006-01-02 15:04"), len(dst.Files))
 	fmt.Fprintf(w, "%s\n\n", sep)
 
@@ -391,7 +471,11 @@ func printText(result *CompareResult, src, dst *Index) {
 	if len(result.Missing) > 0 {
 		fmt.Fprintf(w, "MISSING FILES (%d) - present in source, not found in dest:\n%s\n", len(result.Missing), sep)
 		for _, f := range result.Missing {
-			fmt.Fprintf(w, "  [MISSING] %s  (%s)\n", f.Path, humanSize(f.Size))
+			if multiSrc {
+				fmt.Fprintf(w, "  [MISSING] %s  (%s)  [from: %s]\n", f.Path, humanSize(f.Size), f.SourceIndex)
+			} else {
+				fmt.Fprintf(w, "  [MISSING] %s  (%s)\n", f.Path, humanSize(f.Size))
+			}
 		}
 		fmt.Fprintln(w)
 	}
@@ -424,24 +508,51 @@ func printHTML(result *CompareResult, src, dst *Index) {
 	missing := result.Missing
 	sizeMismatch := result.SizeMismatch
 	hashMismatch := result.HashMismatch
+	multiSrc := src.Root == "(merged)"
 
 	var missingBuf, sizeBuf, hashBuf strings.Builder
 	for _, f := range missing {
-		fmt.Fprintf(&missingBuf, `<tr><td class="path">%s</td><td class="ext">%s</td><td class="size">%s</td></tr>`,
-			htmlEsc(f.Path), htmlEsc(f.Ext), humanSize(f.Size))
+		if multiSrc {
+			fmt.Fprintf(&missingBuf, "<tr><td class=\"path\">%s</td><td class=\"dst-path\">%s</td><td class=\"ext\">%s</td><td class=\"size\">%s</td></tr>",
+				htmlEsc(f.Path), htmlEsc(f.SourceIndex), htmlEsc(f.Ext), humanSize(f.Size))
+		} else {
+			fmt.Fprintf(&missingBuf, "<tr><td class=\"path\">%s</td><td class=\"ext\">%s</td><td class=\"size\">%s</td></tr>",
+				htmlEsc(f.Path), htmlEsc(f.Ext), humanSize(f.Size))
+		}
 	}
 	for _, p := range sizeMismatch {
-		fmt.Fprintf(&sizeBuf, `<tr><td class="name">%s</td><td class="path">%s<br><span class="dst-path">%s</span></td><td class="size">%s → %s</td></tr>`,
+		fmt.Fprintf(&sizeBuf, "<tr><td class=\"name\">%s</td><td class=\"path\">%s<br><span class=\"dst-path\">%s</span></td><td class=\"size\">%s &rarr; %s</td></tr>",
 			htmlEsc(p.Source.Name), htmlEsc(p.Source.Path), htmlEsc(p.Dest.Path),
 			humanSize(p.Source.Size), humanSize(p.Dest.Size))
 	}
 	for _, p := range hashMismatch {
-		fmt.Fprintf(&hashBuf, `<tr><td class="name">%s</td><td class="path">%s<br><span class="dst-path">%s</span></td></tr>`,
+		fmt.Fprintf(&hashBuf, "<tr><td class=\"name\">%s</td><td class=\"path\">%s<br><span class=\"dst-path\">%s</span></td></tr>",
 			htmlEsc(p.Source.Name), htmlEsc(p.Source.Path), htmlEsc(p.Dest.Path))
 	}
 	missingRows := missingBuf.String()
 	sizeRows := sizeBuf.String()
 	hashRows := hashBuf.String()
+
+	var srcMetaBuf strings.Builder
+	if multiSrc {
+		seen := map[string]bool{}
+		for _, f := range src.Files {
+			seen[f.SourceIndex] = true
+		}
+		roots := make([]string, 0, len(seen))
+		for r := range seen {
+			roots = append(roots, r)
+		}
+		sort.Strings(roots)
+		for _, r := range roots {
+			fmt.Fprintf(&srcMetaBuf, "<b>%s</b><br>", htmlEsc(r))
+		}
+		fmt.Fprintf(&srcMetaBuf, "(%d files total)", len(src.Files))
+	} else {
+		fmt.Fprintf(&srcMetaBuf, "<b>%s</b> &middot; %d files &middot; scanned %s",
+			htmlEsc(src.Root), len(src.Files), src.ScannedAt.Format("2006-01-02 15:04"))
+	}
+	srcMeta := srcMetaBuf.String()
 
 	status := "ok"
 	statusText := "All files present"
@@ -451,102 +562,68 @@ func printHTML(result *CompareResult, src, dst *Index) {
 			len(missing), len(sizeMismatch), len(hashMismatch))
 	}
 
-	fmt.Printf(`<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>File Sync Report</title>
-<style>
-  :root { --bg:#0f1117; --surface:#1a1d27; --border:#2d3148; --text:#e2e8f0; --muted:#64748b; --red:#f87171; --yellow:#fbbf24; --green:#4ade80; --blue:#60a5fa; }
-  * { box-sizing:border-box; margin:0; padding:0 }
-  body { background:var(--bg); color:var(--text); font:14px/1.5 ui-monospace,monospace; padding:24px }
-  h1 { font-size:18px; font-weight:600; margin-bottom:4px }
-  .meta { color:var(--muted); font-size:12px; margin-bottom:24px }
-  .status-ok { color:var(--green) }
-  .status-warn { color:var(--red) }
-  .section { margin-bottom:32px }
-  .section h2 { font-size:13px; font-weight:600; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); margin-bottom:8px; padding-bottom:6px; border-bottom:1px solid var(--border) }
-  .section h2 .count { color:var(--red); margin-left:8px }
-  table { width:100%%; border-collapse:collapse }
-  th { text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); padding:6px 10px; border-bottom:1px solid var(--border) }
-  td { padding:7px 10px; border-bottom:1px solid var(--border); word-break:break-all }
-  tr:hover td { background:var(--surface) }
-  .path { color:var(--blue) }
-  .dst-path { color:var(--muted); font-size:12px }
-  .ext { color:var(--yellow); width:60px }
-  .size { color:var(--muted); white-space:nowrap; width:100px }
-  .name { color:var(--text); width:280px }
-  .empty { color:var(--green); padding:10px }
-  .summary { display:flex; gap:24px; margin-top:24px; padding-top:16px; border-top:1px solid var(--border) }
-  .stat { text-align:center }
-  .stat .n { font-size:28px; font-weight:700 }
-  .stat .l { font-size:11px; color:var(--muted); text-transform:uppercase }
-  .n-red { color:var(--red) }
-  .n-yellow { color:var(--yellow) }
-  .n-green { color:var(--green) }
-</style>
-</head>
-<body>
-<h1>File Sync Report</h1>
-<div class="meta">
-  Source: <b>%s</b> &middot; %d files &middot; scanned %s<br>
-  Dest: <b>%s</b> &middot; %d files &middot; scanned %s<br>
-  Status: <span class="status-%s">%s</span>
-</div>
+	missingHeader := "Path"
+	if multiSrc {
+		missingHeader = "Path / Source Disk"
+	}
 
-<div class="section">
-  <h2>Missing Files<span class="count">%d</span></h2>
-  %s
-</div>
-
-<div class="section">
-  <h2>Size Mismatch<span class="count">%d</span></h2>
-  %s
-</div>
-
-%s
-
-<div class="summary">
-  <div class="stat"><div class="n n-red">%d</div><div class="l">Missing</div></div>
-  <div class="stat"><div class="n n-yellow">%d</div><div class="l">Size Mismatch</div></div>
-  <div class="stat"><div class="n n-green">%d</div><div class="l">Hash Mismatch</div></div>
-</div>
-</body>
-</html>`,
-		htmlEsc(src.Root), len(src.Files), src.ScannedAt.Format("2006-01-02 15:04"),
-		htmlEsc(dst.Root), len(dst.Files), dst.ScannedAt.Format("2006-01-02 15:04"),
-		status, statusText,
-		len(missing),
-		missingTableOrEmpty(missingRows, "Path", "Ext", "Size"),
-		len(sizeMismatch),
-		sizeTableOrEmpty(sizeRows),
-		hashSection(hashRows, len(hashMismatch)),
-		len(missing), len(sizeMismatch), len(hashMismatch),
-	)
+	w := os.Stdout
+	fmt.Fprint(w, "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"><title>File Sync Report</title><style>\n")
+	fmt.Fprint(w, "  :root{--bg:#0f1117;--surface:#1a1d27;--border:#2d3148;--text:#e2e8f0;--muted:#64748b;--red:#f87171;--yellow:#fbbf24;--green:#4ade80;--blue:#60a5fa;}\n")
+	fmt.Fprint(w, "  *{box-sizing:border-box;margin:0;padding:0}\n")
+	fmt.Fprint(w, "  body{background:var(--bg);color:var(--text);font:14px/1.5 ui-monospace,monospace;padding:24px}\n")
+	fmt.Fprint(w, "  h1{font-size:18px;font-weight:600;margin-bottom:4px}\n")
+	fmt.Fprint(w, "  .meta{color:var(--muted);font-size:12px;margin-bottom:24px}\n")
+	fmt.Fprint(w, "  .status-ok{color:var(--green)}.status-warn{color:var(--red)}\n")
+	fmt.Fprint(w, "  .section{margin-bottom:32px}\n")
+	fmt.Fprint(w, "  .section h2{font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--border)}\n")
+	fmt.Fprint(w, "  .section h2 .count{color:var(--red);margin-left:8px}\n")
+	fmt.Fprint(w, "  table{width:100%;border-collapse:collapse}\n")
+	fmt.Fprint(w, "  th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);padding:6px 10px;border-bottom:1px solid var(--border)}\n")
+	fmt.Fprint(w, "  td{padding:7px 10px;border-bottom:1px solid var(--border);word-break:break-all}\n")
+	fmt.Fprint(w, "  tr:hover td{background:var(--surface)}\n")
+	fmt.Fprint(w, "  .path{color:var(--blue)}.dst-path{color:var(--muted);font-size:12px}.ext{color:var(--yellow);width:60px}.size{color:var(--muted);white-space:nowrap;width:100px}.name{color:var(--text);width:280px}\n")
+	fmt.Fprint(w, "  .empty{color:var(--green);padding:10px}\n")
+	fmt.Fprint(w, "  .summary{display:flex;gap:24px;margin-top:24px;padding-top:16px;border-top:1px solid var(--border)}\n")
+	fmt.Fprint(w, "  .stat{text-align:center}.stat .n{font-size:28px;font-weight:700}.stat .l{font-size:11px;color:var(--muted);text-transform:uppercase}\n")
+	fmt.Fprint(w, "  .n-red{color:var(--red)}.n-yellow{color:var(--yellow)}.n-green{color:var(--green)}\n")
+	fmt.Fprint(w, "</style></head><body>\n")
+	fmt.Fprint(w, "<h1>File Sync Report</h1>\n")
+	fmt.Fprintf(w, "<div class=\"meta\">\n  Source: %s<br>\n  Dest: <b>%s</b> &middot; %d files &middot; scanned %s<br>\n  Status: <span class=\"status-%s\">%s</span>\n</div>\n",
+		srcMeta, htmlEsc(dst.Root), len(dst.Files), dst.ScannedAt.Format("2006-01-02 15:04"), status, statusText)
+	fmt.Fprintf(w, "<div class=\"section\"><h2>Missing Files<span class=\"count\">%d</span></h2>%s</div>\n",
+		len(missing), missingTableOrEmpty(missingRows, missingHeader, multiSrc))
+	fmt.Fprintf(w, "<div class=\"section\"><h2>Size Mismatch<span class=\"count\">%d</span></h2>%s</div>\n",
+		len(sizeMismatch), sizeTableOrEmpty(sizeRows))
+	fmt.Fprint(w, hashSection(hashRows, len(hashMismatch)))
+	fmt.Fprintf(w, "<div class=\"summary\"><div class=\"stat\"><div class=\"n n-red\">%d</div><div class=\"l\">Missing</div></div><div class=\"stat\"><div class=\"n n-yellow\">%d</div><div class=\"l\">Size Mismatch</div></div><div class=\"stat\"><div class=\"n n-green\">%d</div><div class=\"l\">Hash Mismatch</div></div></div>\n",
+		len(missing), len(sizeMismatch), len(hashMismatch))
+	fmt.Fprint(w, "</body></html>\n")
 }
 
-func missingTableOrEmpty(rows, c1, c2, c3 string) string {
+func missingTableOrEmpty(rows, pathHeader string, multiSrc bool) string {
 	if rows == "" {
-		return `<p class="empty">None - all source files found in dest</p>`
+		return "<p class=\"empty\">None - all source files found in dest</p>"
 	}
-	return fmt.Sprintf(`<table><tr><th>%s</th><th>%s</th><th>%s</th></tr>%s</table>`, c1, c2, c3, rows)
+	if multiSrc {
+		return fmt.Sprintf("<table><tr><th>%s</th><th>Source Disk</th><th>Ext</th><th>Size</th></tr>%s</table>", htmlEsc(pathHeader), rows)
+	}
+	return fmt.Sprintf("<table><tr><th>%s</th><th>Ext</th><th>Size</th></tr>%s</table>", htmlEsc(pathHeader), rows)
 }
 
 func sizeTableOrEmpty(rows string) string {
 	if rows == "" {
-		return `<p class="empty">None</p>`
+		return "<p class=\"empty\">None</p>"
 	}
-	return fmt.Sprintf(`<table><tr><th>Name</th><th>Paths (src / dst)</th><th>Size</th></tr>%s</table>`, rows)
+	return fmt.Sprintf("<table><tr><th>Name</th><th>Paths (src / dst)</th><th>Size</th></tr>%s</table>", rows)
 }
 
 func hashSection(rows string, count int) string {
 	if count == 0 {
 		return ""
 	}
-	return fmt.Sprintf(`<div class="section">
-  <h2>Hash Mismatch (same name+size, different content)<span class="count">%d</span></h2>
-  <table><tr><th>Name</th><th>Paths (src / dst)</th></tr>%s</table>
-</div>`, count, rows)
+	return fmt.Sprintf("<div class=\"section\"><h2>Hash Mismatch (same name+size, different content)<span class=\"count\">%d</span></h2><table><tr><th>Name</th><th>Paths (src / dst)</th></tr>%s</table></div>\n",
+		count, rows)
 }
 
 // ---------- helpers ----------
@@ -581,6 +658,26 @@ func parseExts(s string) map[string]bool {
 	return m
 }
 
+// splitArgs separates flag args (starting with -) from positional args so that
+// flags work in any position (e.g. `scan /path --output file.json`).
+func splitArgs(args []string) (flags []string, pos []string) {
+	i := 0
+	for i < len(args) {
+		a := args[i]
+		if strings.HasPrefix(a, "-") {
+			flags = append(flags, a)
+			if !strings.Contains(a, "=") && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+				i++
+				flags = append(flags, args[i])
+			}
+		} else {
+			pos = append(pos, a)
+		}
+		i++
+	}
+	return
+}
+
 func humanSize(b int64) string {
 	const unit = 1024
 	if b < unit {
@@ -600,28 +697,6 @@ func htmlEsc(s string) string {
 	s = strings.ReplaceAll(s, ">", "&gt;")
 	s = strings.ReplaceAll(s, `"`, "&#34;")
 	return s
-}
-
-// splitArgs separates flag args (starting with -) from positional args so that
-// flags work in any position (e.g. `scan /path --output file.json`).
-func splitArgs(args []string) (flags []string, pos []string) {
-	i := 0
-	for i < len(args) {
-		a := args[i]
-		if strings.HasPrefix(a, "-") {
-			flags = append(flags, a)
-			// If the flag looks like --key (no =value), consume next arg as value
-			// unless next arg also starts with -.
-			if !strings.Contains(a, "=") && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
-				i++
-				flags = append(flags, args[i])
-			}
-		} else {
-			pos = append(pos, a)
-		}
-		i++
-	}
-	return
 }
 
 func fatal(err error) {
