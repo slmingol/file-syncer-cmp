@@ -496,6 +496,50 @@ func compare(src, dst *Index, useHash bool, fuzzy bool) *CompareResult {
 	return result
 }
 
+// rsyncCommands builds deduplicated ~/rsync.sh commands for missing files,
+// grouped by source disk. Each command syncs the parent directory of the file.
+func rsyncCommands(missing []FileRecord) string {
+	// disk → ordered unique dirs
+	type entry struct{ disk, dir string }
+	seen := map[entry]bool{}
+	var order []entry
+
+	for _, f := range missing {
+		root := f.SourceIndex
+		if root == "" {
+			root = "."
+		}
+		dir := filepath.Dir(filepath.Join(root, f.Path))
+		e := entry{root, dir}
+		if !seen[e] {
+			seen[e] = true
+			order = append(order, e)
+		}
+	}
+
+	// Group by disk for readability
+	byDisk := map[string][]string{}
+	var diskOrder []string
+	seenDisk := map[string]bool{}
+	for _, e := range order {
+		if !seenDisk[e.disk] {
+			seenDisk[e.disk] = true
+			diskOrder = append(diskOrder, e.disk)
+		}
+		byDisk[e.disk] = append(byDisk[e.disk], e.dir)
+	}
+
+	var b strings.Builder
+	for _, disk := range diskOrder {
+		fmt.Fprintf(&b, "# %s\n", disk)
+		for _, dir := range byDisk[disk] {
+			fmt.Fprintf(&b, "~/rsync.sh %q\n", dir)
+		}
+		b.WriteString("\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
 // ---------- reporting ----------
 
 func printReport(result *CompareResult, src, dst *Index, format string) {
@@ -684,7 +728,11 @@ func printHTML(result *CompareResult, src, dst *Index) {
 	fmt.Fprint(w, "  .summary{display:flex;gap:24px;margin-top:24px;padding-top:16px;border-top:1px solid var(--border)}\n")
 	fmt.Fprint(w, "  .stat{text-align:center}.stat .n{font-size:28px;font-weight:700}.stat .l{font-size:11px;color:var(--muted);text-transform:uppercase}\n")
 	fmt.Fprint(w, "  .n-red{color:var(--red)}.n-yellow{color:var(--yellow)}.n-green{color:var(--green)}\n")
-	fmt.Fprint(w, "</style></head><body>\n")
+	fmt.Fprint(w, "  .rsync-wrap{position:relative}\n")
+	fmt.Fprint(w, "  .rsync-pre{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:14px 16px;overflow-x:auto;font-size:12px;line-height:1.6;color:var(--green);white-space:pre}\n")
+	fmt.Fprint(w, "  .copy-btn{position:absolute;top:8px;right:8px;background:var(--border);color:var(--text);border:none;border-radius:4px;padding:4px 10px;font:11px ui-monospace,monospace;cursor:pointer}\n")
+	fmt.Fprint(w, "  .copy-btn:hover{background:var(--blue);color:#000}\n")
+	fmt.Fprint(w, "</style><script>function copyRsync(id,btn){navigator.clipboard.writeText(document.getElementById(id).textContent).then(function(){btn.textContent='Copied!';setTimeout(function(){btn.textContent='Copy'},2000)}).catch(function(){var el=document.getElementById(id);var r=document.createRange();r.selectNode(el);window.getSelection().removeAllRanges();window.getSelection().addRange(r)})}</script></head><body>\n")
 	fmt.Fprint(w, "<h1>File Sync Report</h1>\n")
 	fmt.Fprintf(w, "<div class=\"meta\">\n  Source: %s<br>\n  Dest: <b>%s</b> &middot; %d files &middot; scanned %s<br>\n  Status: <span class=\"status-%s\">%s</span>\n</div>\n",
 		srcMeta, htmlEsc(dst.Root), len(dst.Files), dst.ScannedAt.Format("2006-01-02 15:04"), status, statusText)
@@ -696,6 +744,11 @@ func printHTML(result *CompareResult, src, dst *Index) {
 	if fuzzyRows != "" {
 		fmt.Fprintf(w, "<div class=\"section\"><h2>Fuzzy Match — likely renamed/renumbered<span class=\"count\" style=\"color:var(--blue)\">%d</span></h2><p style=\"color:var(--muted);font-size:12px;margin-bottom:8px\">name or title matches dest file — likely copied but renamed or episode renumbered</p><table><tr><th>Name</th><th>Paths (src / dest)</th><th>Size</th><th>Size Check</th><th>Reason</th></tr>%s</table></div>\n",
 			len(result.FuzzyMatch), fuzzyRows)
+	}
+	if len(missing) > 0 {
+		cmds := htmlEsc(rsyncCommands(missing))
+		fmt.Fprintf(w, "<div class=\"section\"><h2>Rsync Commands<span class=\"count\" style=\"color:var(--green)\">%d dirs</span></h2><p style=\"color:var(--muted);font-size:12px;margin-bottom:8px\">Run ~/rsync.sh for each missing-file directory:</p><div class=\"rsync-wrap\"><pre class=\"rsync-pre\" id=\"rsync-cmds\">%s</pre><button class=\"copy-btn\" onclick=\"copyRsync('rsync-cmds',this)\">Copy</button></div></div>\n",
+			len(missing), cmds)
 	}
 	fmt.Fprintf(w, "<div class=\"summary\"><div class=\"stat\"><div class=\"n n-red\">%d</div><div class=\"l\">Missing</div></div><div class=\"stat\"><div class=\"n n-yellow\">%d</div><div class=\"l\">Size Mismatch</div></div><div class=\"stat\"><div class=\"n n-green\">%d</div><div class=\"l\">Hash Mismatch</div></div><div class=\"stat\"><div class=\"n\" style=\"color:var(--blue)\">%d</div><div class=\"l\">Fuzzy Match</div></div></div>\n",
 		len(missing), len(sizeMismatch), len(hashMismatch), len(result.FuzzyMatch))
