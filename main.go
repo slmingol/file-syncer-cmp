@@ -641,15 +641,47 @@ func printHTML(result *CompareResult, src, dst *Index) {
 	multiSrc := src.Root == "(merged)"
 
 	var missingBuf, sizeBuf, hashBuf, fuzzyBuf strings.Builder
-	for _, f := range missing {
-		if multiSrc {
-			fmt.Fprintf(&missingBuf, "<tr><td class=\"path\">%s</td><td class=\"dst-path\">%s</td><td class=\"ext\">%s</td><td class=\"size\">%s</td></tr>",
-				htmlEsc(f.Path), htmlEsc(f.SourceIndex), htmlEsc(f.Ext), humanSize(f.Size))
-		} else {
-			fmt.Fprintf(&missingBuf, "<tr><td class=\"path\">%s</td><td class=\"ext\">%s</td><td class=\"size\">%s</td></tr>",
-				htmlEsc(f.Path), htmlEsc(f.Ext), humanSize(f.Size))
+
+	// Group missing files by parent directory for collapsible display.
+	if len(missing) > 0 {
+		type dirGroup struct {
+			dir   string
+			files []FileRecord
+		}
+		dirOrder := []string{}
+		dirMap := map[string]*dirGroup{}
+		for _, f := range missing {
+			d := filepath.Dir(f.Path)
+			if d == "." {
+				d = "(root)"
+			}
+			if _, ok := dirMap[d]; !ok {
+				dirOrder = append(dirOrder, d)
+				dirMap[d] = &dirGroup{dir: d}
+			}
+			dirMap[d].files = append(dirMap[d].files, f)
+		}
+		for _, d := range dirOrder {
+			g := dirMap[d]
+			fmt.Fprintf(&missingBuf, "<details><summary class=\"dir-summary\"><span class=\"dir-name\">%s/</span> <span class=\"dir-count\">%d file(s)</span></summary><table class=\"dir-table\">",
+				htmlEsc(g.dir), len(g.files))
+			if multiSrc {
+				fmt.Fprint(&missingBuf, "<tr><th>File</th><th>Source Disk</th><th>Ext</th><th>Size</th></tr>")
+				for _, f := range g.files {
+					fmt.Fprintf(&missingBuf, "<tr><td class=\"path\">%s</td><td class=\"dst-path\">%s</td><td class=\"ext\">%s</td><td class=\"size\">%s</td></tr>",
+						htmlEsc(f.Name), htmlEsc(f.SourceIndex), htmlEsc(f.Ext), humanSize(f.Size))
+				}
+			} else {
+				fmt.Fprint(&missingBuf, "<tr><th>File</th><th>Ext</th><th>Size</th></tr>")
+				for _, f := range g.files {
+					fmt.Fprintf(&missingBuf, "<tr><td class=\"path\">%s</td><td class=\"ext\">%s</td><td class=\"size\">%s</td></tr>",
+						htmlEsc(f.Name), htmlEsc(f.Ext), humanSize(f.Size))
+				}
+			}
+			fmt.Fprint(&missingBuf, "</table></details>")
 		}
 	}
+
 	for _, p := range sizeMismatch {
 		fmt.Fprintf(&sizeBuf, "<tr><td class=\"name\">%s</td><td class=\"path\">%s<br><span class=\"dst-path\">%s</span></td><td class=\"size\">%s &rarr; %s</td></tr>",
 			htmlEsc(p.Source.Name), htmlEsc(p.Source.Path), htmlEsc(p.Dest.Path),
@@ -728,6 +760,16 @@ func printHTML(result *CompareResult, src, dst *Index) {
 	fmt.Fprint(w, "  .summary{display:flex;gap:24px;margin-top:24px;padding-top:16px;border-top:1px solid var(--border)}\n")
 	fmt.Fprint(w, "  .stat{text-align:center}.stat .n{font-size:28px;font-weight:700}.stat .l{font-size:11px;color:var(--muted);text-transform:uppercase}\n")
 	fmt.Fprint(w, "  .n-red{color:var(--red)}.n-yellow{color:var(--yellow)}.n-green{color:var(--green)}\n")
+	fmt.Fprint(w, "  details{margin-bottom:4px}\n")
+	fmt.Fprint(w, "  .dir-summary{cursor:pointer;list-style:none;padding:7px 10px;border-radius:4px;background:var(--surface);border:1px solid var(--border);display:flex;align-items:center;gap:10px;user-select:none}\n")
+	fmt.Fprint(w, "  .dir-summary::-webkit-details-marker{display:none}\n")
+	fmt.Fprint(w, "  .dir-summary::before{content:'▶';font-size:10px;color:var(--muted);transition:transform .15s}\n")
+	fmt.Fprint(w, "  details[open]>.dir-summary::before{transform:rotate(90deg)}\n")
+	fmt.Fprint(w, "  .dir-summary:hover{border-color:var(--blue)}\n")
+	fmt.Fprint(w, "  .dir-name{color:var(--blue);font-weight:600}\n")
+	fmt.Fprint(w, "  .dir-count{color:var(--muted);font-size:11px}\n")
+	fmt.Fprint(w, "  .dir-table{width:100%;border-collapse:collapse;margin:0 0 4px 0;border:1px solid var(--border);border-top:none;border-radius:0 0 4px 4px}\n")
+	fmt.Fprint(w, "  .dir-table td,.dir-table th{padding:5px 12px 5px 28px}\n")
 	fmt.Fprint(w, "  .rsync-wrap{position:relative}\n")
 	fmt.Fprint(w, "  .rsync-pre{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:14px 16px;overflow-x:auto;font-size:12px;line-height:1.6;color:var(--green);white-space:pre}\n")
 	fmt.Fprint(w, "  .copy-btn{position:absolute;top:8px;right:8px;background:var(--border);color:var(--text);border:none;border-radius:4px;padding:4px 10px;font:11px ui-monospace,monospace;cursor:pointer}\n")
@@ -755,14 +797,11 @@ func printHTML(result *CompareResult, src, dst *Index) {
 	fmt.Fprint(w, "</body></html>\n")
 }
 
-func missingTableOrEmpty(rows, pathHeader string, multiSrc bool) string {
+func missingTableOrEmpty(rows, _ string, _ bool) string {
 	if rows == "" {
 		return "<p class=\"empty\">None - all source files found in dest</p>"
 	}
-	if multiSrc {
-		return fmt.Sprintf("<table><tr><th>%s</th><th>Source Disk</th><th>Ext</th><th>Size</th></tr>%s</table>", htmlEsc(pathHeader), rows)
-	}
-	return fmt.Sprintf("<table><tr><th>%s</th><th>Ext</th><th>Size</th></tr>%s</table>", htmlEsc(pathHeader), rows)
+	return rows
 }
 
 func sizeTableOrEmpty(rows string) string {
