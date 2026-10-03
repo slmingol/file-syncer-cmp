@@ -14,6 +14,8 @@ import (
 	"time"
 )
 
+var version = "dev"
+
 var defaultExts = []string{
 	"mp3", "flac", "wav", "aac", "ogg", "opus", "m4a", "wma", "alac", "aiff",
 	"mkv", "mp4", "avi", "mov", "m4v", "ts", "m2ts", "wmv", "webm", "vob",
@@ -59,6 +61,8 @@ func main() {
 		cmdCompare(os.Args[2:])
 	case "sync-check":
 		cmdSyncCheck(os.Args[2:])
+	case "version", "--version", "-version":
+		fmt.Printf("file-syncer-cmp %s\n", version)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", os.Args[1])
 		printUsage()

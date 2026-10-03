@@ -14,6 +14,7 @@ jobs:
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.major }}.${{ steps.release.outputs.minor }}.${{ steps.release.outputs.patch }}
     steps:
       - uses: google-github-actions/release-please-action@v4
         id: release
@@ -33,18 +34,109 @@ jobs:
           go-version: "1.21"
 
       - name: Build all targets
+        env:
+          VERSION: ${{ needs.release-please.outputs.version }}
         run: |
-          GOOS=linux  GOARCH=amd64 go build -o dist/file-syncer-cmp-linux-amd64  .
-          GOOS=linux  GOARCH=arm64 go build -o dist/file-syncer-cmp-linux-arm64  .
-          GOOS=darwin GOARCH=amd64 go build -o dist/file-syncer-cmp-darwin-amd64 .
-          GOOS=darwin GOARCH=arm64 go build -o dist/file-syncer-cmp-darwin-arm64 .
+          LDFLAGS="-X main.version=${VERSION}"
+          mkdir -p dist tarballs
+          GOOS=linux  GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o dist/file-syncer-cmp-linux-amd64  .
+          GOOS=linux  GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o dist/file-syncer-cmp-linux-arm64  .
+          GOOS=darwin GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o dist/file-syncer-cmp-darwin-amd64 .
+          GOOS=darwin GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o dist/file-syncer-cmp-darwin-arm64 .
+
+      - name: Package into tarballs
+        run: |
+          for target in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64; do
+            cp dist/file-syncer-cmp-${target} file-syncer-cmp
+            tar czf tarballs/file-syncer-cmp-${target}.tar.gz file-syncer-cmp
+            rm file-syncer-cmp
+          done
+
+      - name: Compute SHA256
+        id: sha256
+        run: |
+          for target in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64; do
+            sha=$(sha256sum tarballs/file-syncer-cmp-${target}.tar.gz | awk '{print $1}')
+            key="${target//-/_}_sha256"
+            echo "${key}=${sha}" >> $GITHUB_OUTPUT
+          done
 
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.release-please.outputs.tag_name }}
-          files: |
-            dist/file-syncer-cmp-linux-amd64
-            dist/file-syncer-cmp-linux-arm64
-            dist/file-syncer-cmp-darwin-amd64
-            dist/file-syncer-cmp-darwin-arm64
+          files: tarballs/*.tar.gz
+
+      - name: Update Homebrew formula
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+          VERSION: ${{ needs.release-please.outputs.version }}
+          SHA_DARWIN_AMD64: ${{ steps.sha256.outputs.darwin_amd64_sha256 }}
+          SHA_DARWIN_ARM64: ${{ steps.sha256.outputs.darwin_arm64_sha256 }}
+          SHA_LINUX_AMD64:  ${{ steps.sha256.outputs.linux_amd64_sha256 }}
+          SHA_LINUX_ARM64:  ${{ steps.sha256.outputs.linux_arm64_sha256 }}
+        run: |
+          BASE_URL="https://github.com/slmingol/file-syncer-cmp/releases/download/${TAG}"
+
+          cat > file-syncer-cmp.rb << FORMULA
+          # typed: false
+          # frozen_string_literal: true
+
+          class FileSyncerCmp < Formula
+            desc "Deep media sync auditor — path-independent file comparison for rsync'd content"
+            homepage "https://github.com/slmingol/file-syncer-cmp"
+            license "MIT"
+            version "${VERSION}"
+
+            on_macos do
+              if Hardware::CPU.intel?
+                url "${BASE_URL}/file-syncer-cmp-darwin-amd64.tar.gz"
+                sha256 "${SHA_DARWIN_AMD64}"
+              end
+              if Hardware::CPU.arm?
+                url "${BASE_URL}/file-syncer-cmp-darwin-arm64.tar.gz"
+                sha256 "${SHA_DARWIN_ARM64}"
+              end
+            end
+
+            on_linux do
+              if Hardware::CPU.intel? && Hardware::CPU.is_64_bit?
+                url "${BASE_URL}/file-syncer-cmp-linux-amd64.tar.gz"
+                sha256 "${SHA_LINUX_AMD64}"
+              end
+              if Hardware::CPU.arm? && Hardware::CPU.is_64_bit?
+                url "${BASE_URL}/file-syncer-cmp-linux-arm64.tar.gz"
+                sha256 "${SHA_LINUX_ARM64}"
+              end
+            end
+
+            def install
+              bin.install "file-syncer-cmp"
+            end
+
+            test do
+              assert_match version.to_s, shell_output("#{bin}/file-syncer-cmp version")
+            end
+          end
+          FORMULA
+
+          # Get current SHA of formula file (needed for update; empty on first create)
+          CURRENT_SHA=$(gh api repos/slmingol/homebrew-tap/contents/Formula/file-syncer-cmp.rb \
+            --jq '.sha' 2>/dev/null || echo "")
+
+          CONTENT=$(base64 -w0 file-syncer-cmp.rb)
+          MSG="chore: update file-syncer-cmp to ${VERSION}"
+
+          if [ -z "$CURRENT_SHA" ]; then
+            gh api repos/slmingol/homebrew-tap/contents/Formula/file-syncer-cmp.rb \
+              --method PUT \
+              --field message="$MSG" \
+              --field content="$CONTENT"
+          else
+            gh api repos/slmingol/homebrew-tap/contents/Formula/file-syncer-cmp.rb \
+              --method PUT \
+              --field message="$MSG" \
+              --field content="$CONTENT" \
+              --field sha="$CURRENT_SHA"
+          fi

@@ -19,8 +19,17 @@ jobs:
         with:
           go-version: "1.21"
 
-      - name: Build
-        run: go build ./...
+      - name: Build (native)
+        run: go build -ldflags="-X main.version=ci" ./...
 
       - name: Vet
         run: go vet ./...
+
+      - name: Cross-compile all targets
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          LDFLAGS="-X main.version=ci"
+          GOOS=linux  GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o /dev/null .
+          GOOS=linux  GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o /dev/null .
+          GOOS=darwin GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o /dev/null .
+          GOOS=darwin GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o /dev/null .
