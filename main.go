@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -76,6 +77,16 @@ type FuzzyPair struct {
 	Source    FileRecord `json:"source"`
 	Dest      FileRecord `json:"dest"`
 	SizeMatch bool       `json:"size_match"`
+	Reason    string     `json:"reason"` // "substring" or "episode-renumbered"
+}
+
+// reEpisode matches SxxExx / SxxExxExx patterns (e.g. S01E02, S01E01E02).
+var reEpisode = regexp.MustCompile(`(?i)s\d{1,2}e\d{1,2}(?:e\d{1,2})?`)
+
+// stripEpisode removes episode codes and collapses extra whitespace.
+func stripEpisode(name string) string {
+	s := reEpisode.ReplaceAllString(name, " ")
+	return strings.Join(strings.Fields(s), " ")
 }
 
 func main() {
@@ -396,11 +407,15 @@ func compare(src, dst *Index, useHash bool, fuzzy bool) *CompareResult {
 		byName[key] = append(byName[key], f)
 	}
 
-	// For fuzzy: build a flat list of all dest files for substring scan.
-	// Only populated when fuzzy mode is on.
+	// For fuzzy: build a flat list and a stripped-name index for dest.
 	var allDest []FileRecord
+	byStrippedName := make(map[string][]FileRecord) // stripped name → dest files
 	if fuzzy {
 		allDest = dst.Files
+		for _, f := range dst.Files {
+			key := strings.ToLower(stripEpisode(f.Name))
+			byStrippedName[key] = append(byStrippedName[key], f)
+		}
 	}
 
 	result := &CompareResult{}
@@ -412,19 +427,40 @@ func compare(src, dst *Index, useHash bool, fuzzy bool) *CompareResult {
 			// Try fuzzy: src name is a substring of some dest name (or vice versa).
 			if fuzzy {
 				srcLow := strings.ToLower(sf.Name)
+
+				// Tier 1: substring match on full name.
 				var best *FileRecord
+				var reason string
 				for i := range allDest {
 					dLow := strings.ToLower(allDest[i].Name)
 					if strings.Contains(dLow, srcLow) || strings.Contains(srcLow, dLow) {
 						best = &allDest[i]
+						reason = "substring"
 						break
 					}
 				}
+
+				// Tier 2: strip SxxExx codes, then substring match on title.
+				if best == nil {
+					srcStripped := strings.ToLower(stripEpisode(sf.Name))
+					if srcStripped != "" {
+						for i := range allDest {
+							dStripped := strings.ToLower(stripEpisode(allDest[i].Name))
+							if strings.Contains(dStripped, srcStripped) || strings.Contains(srcStripped, dStripped) {
+								best = &allDest[i]
+								reason = "episode-renumbered"
+								break
+							}
+						}
+					}
+				}
+
 				if best != nil {
 					result.FuzzyMatch = append(result.FuzzyMatch, FuzzyPair{
 						Source:    sf,
 						Dest:      *best,
 						SizeMatch: sf.Size == best.Size,
+						Reason:    reason,
 					})
 					continue
 				}
@@ -537,13 +573,13 @@ func printText(result *CompareResult, src, dst *Index) {
 	}
 
 	if len(result.FuzzyMatch) > 0 {
-		fmt.Fprintf(w, "FUZZY MATCH (%d) - src name substring of dest name (likely renamed):\n%s\n", len(result.FuzzyMatch), sep)
+		fmt.Fprintf(w, "FUZZY MATCH (%d) - likely present but renamed/renumbered:\n%s\n", len(result.FuzzyMatch), sep)
 		for _, p := range result.FuzzyMatch {
-			sizeTag := "size matches"
+			sizeTag := "size ok"
 			if !p.SizeMatch {
 				sizeTag = "SIZE DIFFERS"
 			}
-			fmt.Fprintf(w, "  [FUZZY/%s] %s\n", sizeTag, p.Source.Name)
+			fmt.Fprintf(w, "  [FUZZY/%s/%s] %s\n", p.Reason, sizeTag, p.Source.Name)
 			fmt.Fprintf(w, "    src: %s  (%s)\n", p.Source.Path, humanSize(p.Source.Size))
 			fmt.Fprintf(w, "    dst: %s  (%s)\n", p.Dest.Path, humanSize(p.Dest.Size))
 		}
@@ -584,9 +620,10 @@ func printHTML(result *CompareResult, src, dst *Index) {
 		if !p.SizeMatch {
 			sizeTag = "<span style=\"color:var(--red)\">size differs</span>"
 		}
-		fmt.Fprintf(&fuzzyBuf, "<tr><td class=\"name\">%s</td><td class=\"path\">%s<br><span class=\"dst-path\">%s</span></td><td class=\"size\">%s &rarr; %s</td><td>%s</td></tr>",
+		reasonTag := p.Reason
+		fmt.Fprintf(&fuzzyBuf, "<tr><td class=\"name\">%s</td><td class=\"path\">%s<br><span class=\"dst-path\">%s</span></td><td class=\"size\">%s &rarr; %s</td><td>%s</td><td class=\"ext\">%s</td></tr>",
 			htmlEsc(p.Source.Name), htmlEsc(p.Source.Path), htmlEsc(p.Dest.Path),
-			humanSize(p.Source.Size), humanSize(p.Dest.Size), sizeTag)
+			humanSize(p.Source.Size), humanSize(p.Dest.Size), sizeTag, htmlEsc(reasonTag))
 	}
 	missingRows := missingBuf.String()
 	sizeRows := sizeBuf.String()
@@ -657,7 +694,7 @@ func printHTML(result *CompareResult, src, dst *Index) {
 		len(sizeMismatch), sizeTableOrEmpty(sizeRows))
 	fmt.Fprint(w, hashSection(hashRows, len(hashMismatch)))
 	if fuzzyRows != "" {
-		fmt.Fprintf(w, "<div class=\"section\"><h2>Fuzzy Match — likely renamed<span class=\"count\" style=\"color:var(--blue)\">%d</span></h2><p style=\"color:var(--muted);font-size:12px;margin-bottom:8px\">src name is substring of dest name (or vice versa) — file probably copied but renamed</p><table><tr><th>Name</th><th>Paths (src / dest)</th><th>Size</th><th>Size Check</th></tr>%s</table></div>\n",
+		fmt.Fprintf(w, "<div class=\"section\"><h2>Fuzzy Match — likely renamed/renumbered<span class=\"count\" style=\"color:var(--blue)\">%d</span></h2><p style=\"color:var(--muted);font-size:12px;margin-bottom:8px\">name or title matches dest file — likely copied but renamed or episode renumbered</p><table><tr><th>Name</th><th>Paths (src / dest)</th><th>Size</th><th>Size Check</th><th>Reason</th></tr>%s</table></div>\n",
 			len(result.FuzzyMatch), fuzzyRows)
 	}
 	fmt.Fprintf(w, "<div class=\"summary\"><div class=\"stat\"><div class=\"n n-red\">%d</div><div class=\"l\">Missing</div></div><div class=\"stat\"><div class=\"n n-yellow\">%d</div><div class=\"l\">Size Mismatch</div></div><div class=\"stat\"><div class=\"n n-green\">%d</div><div class=\"l\">Hash Mismatch</div></div><div class=\"stat\"><div class=\"n\" style=\"color:var(--blue)\">%d</div><div class=\"l\">Fuzzy Match</div></div></div>\n",
