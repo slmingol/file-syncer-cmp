@@ -64,11 +64,18 @@ type CompareResult struct {
 	Missing      []FileRecord   `json:"missing"`
 	SizeMismatch []MismatchPair `json:"size_mismatch"`
 	HashMismatch []MismatchPair `json:"hash_mismatch,omitempty"`
+	FuzzyMatch   []FuzzyPair    `json:"fuzzy_match,omitempty"`
 }
 
 type MismatchPair struct {
 	Source FileRecord `json:"source"`
 	Dest   FileRecord `json:"dest"`
+}
+
+type FuzzyPair struct {
+	Source    FileRecord `json:"source"`
+	Dest      FileRecord `json:"dest"`
+	SizeMatch bool       `json:"size_match"`
 }
 
 func main() {
@@ -183,6 +190,7 @@ func cmdCompare(args []string) {
 	fs := flag.NewFlagSet("compare", flag.ExitOnError)
 	format := fs.String("format", "text", "output format: text, json, html")
 	doHash := fs.Bool("hash", false, "also compare hashes (both indexes must have hashes)")
+	doFuzzy := fs.Bool("fuzzy", false, "fuzzy name match: treat dest file as found if src name is substring of dest name")
 	destFlag := fs.String("dest", "", "destination index (required when passing multiple sources)")
 
 	flagArgs, posArgs := splitArgs(args)
@@ -213,7 +221,7 @@ func cmdCompare(args []string) {
 	}
 
 	src := mergeIndexes(srcIndexes)
-	result := compare(src, dst, *doHash)
+	result := compare(src, dst, *doHash, *doFuzzy)
 	printReport(result, src, dst, *format)
 }
 
@@ -223,6 +231,7 @@ func cmdSyncCheck(args []string) {
 	fs := flag.NewFlagSet("sync-check", flag.ExitOnError)
 	extList := fs.String("ext", "", "comma-separated extensions")
 	doHash := fs.Bool("hash", false, "compute and compare hashes")
+	doFuzzy := fs.Bool("fuzzy", false, "fuzzy name match: treat dest file as found if src name is substring of dest name")
 	format := fs.String("format", "text", "output format: text, json, html")
 	workers := fs.Int("workers", 8, "parallel scan workers")
 	destFlag := fs.String("dest", "", "destination path (required when passing multiple sources)")
@@ -271,7 +280,7 @@ func cmdSyncCheck(args []string) {
 	fmt.Fprintf(os.Stderr, "found %d files in dest\n", len(dst.Files))
 
 	src := mergeIndexes(srcIndexes)
-	result := compare(src, dst, *doHash)
+	result := compare(src, dst, *doHash, *doFuzzy)
 	printReport(result, src, dst, *format)
 }
 
@@ -380,11 +389,18 @@ func partialHash(path string) uint64 {
 
 // ---------- compare implementation ----------
 
-func compare(src, dst *Index, useHash bool) *CompareResult {
+func compare(src, dst *Index, useHash bool, fuzzy bool) *CompareResult {
 	byName := make(map[string][]FileRecord, len(dst.Files))
 	for _, f := range dst.Files {
 		key := strings.ToLower(f.Name)
 		byName[key] = append(byName[key], f)
+	}
+
+	// For fuzzy: build a flat list of all dest files for substring scan.
+	// Only populated when fuzzy mode is on.
+	var allDest []FileRecord
+	if fuzzy {
+		allDest = dst.Files
 	}
 
 	result := &CompareResult{}
@@ -393,6 +409,26 @@ func compare(src, dst *Index, useHash bool) *CompareResult {
 		key := strings.ToLower(sf.Name)
 		candidates, found := byName[key]
 		if !found {
+			// Try fuzzy: src name is a substring of some dest name (or vice versa).
+			if fuzzy {
+				srcLow := strings.ToLower(sf.Name)
+				var best *FileRecord
+				for i := range allDest {
+					dLow := strings.ToLower(allDest[i].Name)
+					if strings.Contains(dLow, srcLow) || strings.Contains(srcLow, dLow) {
+						best = &allDest[i]
+						break
+					}
+				}
+				if best != nil {
+					result.FuzzyMatch = append(result.FuzzyMatch, FuzzyPair{
+						Source:    sf,
+						Dest:      *best,
+						SizeMatch: sf.Size == best.Size,
+					})
+					continue
+				}
+			}
 			result.Missing = append(result.Missing, sf)
 			continue
 		}
@@ -500,8 +536,22 @@ func printText(result *CompareResult, src, dst *Index) {
 		fmt.Fprintln(w)
 	}
 
-	fmt.Fprintf(w, "%s\nSUMMARY: %d missing, %d size-mismatch, %d hash-mismatch\n",
-		sep, len(result.Missing), len(result.SizeMismatch), len(result.HashMismatch))
+	if len(result.FuzzyMatch) > 0 {
+		fmt.Fprintf(w, "FUZZY MATCH (%d) - src name substring of dest name (likely renamed):\n%s\n", len(result.FuzzyMatch), sep)
+		for _, p := range result.FuzzyMatch {
+			sizeTag := "size matches"
+			if !p.SizeMatch {
+				sizeTag = "SIZE DIFFERS"
+			}
+			fmt.Fprintf(w, "  [FUZZY/%s] %s\n", sizeTag, p.Source.Name)
+			fmt.Fprintf(w, "    src: %s  (%s)\n", p.Source.Path, humanSize(p.Source.Size))
+			fmt.Fprintf(w, "    dst: %s  (%s)\n", p.Dest.Path, humanSize(p.Dest.Size))
+		}
+		fmt.Fprintln(w)
+	}
+
+	fmt.Fprintf(w, "%s\nSUMMARY: %d missing, %d size-mismatch, %d hash-mismatch, %d fuzzy-match\n",
+		sep, len(result.Missing), len(result.SizeMismatch), len(result.HashMismatch), len(result.FuzzyMatch))
 }
 
 func printHTML(result *CompareResult, src, dst *Index) {
@@ -510,7 +560,7 @@ func printHTML(result *CompareResult, src, dst *Index) {
 	hashMismatch := result.HashMismatch
 	multiSrc := src.Root == "(merged)"
 
-	var missingBuf, sizeBuf, hashBuf strings.Builder
+	var missingBuf, sizeBuf, hashBuf, fuzzyBuf strings.Builder
 	for _, f := range missing {
 		if multiSrc {
 			fmt.Fprintf(&missingBuf, "<tr><td class=\"path\">%s</td><td class=\"dst-path\">%s</td><td class=\"ext\">%s</td><td class=\"size\">%s</td></tr>",
@@ -529,9 +579,19 @@ func printHTML(result *CompareResult, src, dst *Index) {
 		fmt.Fprintf(&hashBuf, "<tr><td class=\"name\">%s</td><td class=\"path\">%s<br><span class=\"dst-path\">%s</span></td></tr>",
 			htmlEsc(p.Source.Name), htmlEsc(p.Source.Path), htmlEsc(p.Dest.Path))
 	}
+	for _, p := range result.FuzzyMatch {
+		sizeTag := "<span style=\"color:var(--green)\">size ok</span>"
+		if !p.SizeMatch {
+			sizeTag = "<span style=\"color:var(--red)\">size differs</span>"
+		}
+		fmt.Fprintf(&fuzzyBuf, "<tr><td class=\"name\">%s</td><td class=\"path\">%s<br><span class=\"dst-path\">%s</span></td><td class=\"size\">%s &rarr; %s</td><td>%s</td></tr>",
+			htmlEsc(p.Source.Name), htmlEsc(p.Source.Path), htmlEsc(p.Dest.Path),
+			humanSize(p.Source.Size), humanSize(p.Dest.Size), sizeTag)
+	}
 	missingRows := missingBuf.String()
 	sizeRows := sizeBuf.String()
 	hashRows := hashBuf.String()
+	fuzzyRows := fuzzyBuf.String()
 
 	var srcMetaBuf strings.Builder
 	if multiSrc {
@@ -596,8 +656,12 @@ func printHTML(result *CompareResult, src, dst *Index) {
 	fmt.Fprintf(w, "<div class=\"section\"><h2>Size Mismatch<span class=\"count\">%d</span></h2>%s</div>\n",
 		len(sizeMismatch), sizeTableOrEmpty(sizeRows))
 	fmt.Fprint(w, hashSection(hashRows, len(hashMismatch)))
-	fmt.Fprintf(w, "<div class=\"summary\"><div class=\"stat\"><div class=\"n n-red\">%d</div><div class=\"l\">Missing</div></div><div class=\"stat\"><div class=\"n n-yellow\">%d</div><div class=\"l\">Size Mismatch</div></div><div class=\"stat\"><div class=\"n n-green\">%d</div><div class=\"l\">Hash Mismatch</div></div></div>\n",
-		len(missing), len(sizeMismatch), len(hashMismatch))
+	if fuzzyRows != "" {
+		fmt.Fprintf(w, "<div class=\"section\"><h2>Fuzzy Match — likely renamed<span class=\"count\" style=\"color:var(--blue)\">%d</span></h2><p style=\"color:var(--muted);font-size:12px;margin-bottom:8px\">src name is substring of dest name (or vice versa) — file probably copied but renamed</p><table><tr><th>Name</th><th>Paths (src / dest)</th><th>Size</th><th>Size Check</th></tr>%s</table></div>\n",
+			len(result.FuzzyMatch), fuzzyRows)
+	}
+	fmt.Fprintf(w, "<div class=\"summary\"><div class=\"stat\"><div class=\"n n-red\">%d</div><div class=\"l\">Missing</div></div><div class=\"stat\"><div class=\"n n-yellow\">%d</div><div class=\"l\">Size Mismatch</div></div><div class=\"stat\"><div class=\"n n-green\">%d</div><div class=\"l\">Hash Mismatch</div></div><div class=\"stat\"><div class=\"n\" style=\"color:var(--blue)\">%d</div><div class=\"l\">Fuzzy Match</div></div></div>\n",
+		len(missing), len(sizeMismatch), len(hashMismatch), len(result.FuzzyMatch))
 	fmt.Fprint(w, "</body></html>\n")
 }
 
