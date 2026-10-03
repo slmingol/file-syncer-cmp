@@ -407,14 +407,26 @@ func compare(src, dst *Index, useHash bool, fuzzy bool) *CompareResult {
 		byName[key] = append(byName[key], f)
 	}
 
-	// For fuzzy: build a flat list and a stripped-name index for dest.
-	var allDest []FileRecord
-	byStrippedName := make(map[string][]FileRecord) // stripped name → dest files
+	// Pre-compute fuzzy indexes once — O(m) setup, O(1) or O(k) lookup per miss.
+	var (
+		allDest    []FileRecord
+		destLow    []string         // lowercased name, parallel to allDest
+		byStripped map[string]int   // stripped name → first allDest index (O(1) tier-2)
+		destByExt  map[string][]int // ext → allDest indices (narrows tier-1 scan)
+	)
 	if fuzzy {
 		allDest = dst.Files
-		for _, f := range dst.Files {
-			key := strings.ToLower(stripEpisode(f.Name))
-			byStrippedName[key] = append(byStrippedName[key], f)
+		destLow = make([]string, len(allDest))
+		byStripped = make(map[string]int, len(allDest))
+		destByExt = make(map[string][]int, 32)
+		for i, f := range allDest {
+			destLow[i] = strings.ToLower(f.Name)
+			s := strings.ToLower(stripEpisode(f.Name))
+			if _, exists := byStripped[s]; !exists {
+				byStripped[s] = i
+			}
+			ext := strings.ToLower(f.Ext)
+			destByExt[ext] = append(destByExt[ext], i)
 		}
 	}
 
@@ -427,30 +439,36 @@ func compare(src, dst *Index, useHash bool, fuzzy bool) *CompareResult {
 			// Try fuzzy: src name is a substring of some dest name (or vice versa).
 			if fuzzy {
 				srcLow := strings.ToLower(sf.Name)
+				srcExt := strings.ToLower(sf.Ext)
 
-				// Tier 1: substring match on full name.
+				// Tier 1: substring match — only scan dest files with same extension.
 				var best *FileRecord
 				var reason string
-				for i := range allDest {
-					dLow := strings.ToLower(allDest[i].Name)
+				candidates1 := destByExt[srcExt] // pre-filtered by ext
+				if len(candidates1) == 0 {
+					candidates1 = make([]int, len(allDest)) // fallback: all
+					for i := range allDest {
+						candidates1[i] = i
+					}
+				}
+				for _, i := range candidates1 {
+					dLow := destLow[i]
 					if strings.Contains(dLow, srcLow) || strings.Contains(srcLow, dLow) {
-						best = &allDest[i]
+						f := allDest[i]
+						best = &f
 						reason = "substring"
 						break
 					}
 				}
 
-				// Tier 2: strip SxxExx codes, then substring match on title.
+				// Tier 2: O(1) map lookup on stripped name (handles episode renumbering).
 				if best == nil {
 					srcStripped := strings.ToLower(stripEpisode(sf.Name))
 					if srcStripped != "" {
-						for i := range allDest {
-							dStripped := strings.ToLower(stripEpisode(allDest[i].Name))
-							if strings.Contains(dStripped, srcStripped) || strings.Contains(srcStripped, dStripped) {
-								best = &allDest[i]
-								reason = "episode-renumbered"
-								break
-							}
+						if idx, ok := byStripped[srcStripped]; ok {
+							f := allDest[idx]
+							best = &f
+							reason = "episode-renumbered"
 						}
 					}
 				}
