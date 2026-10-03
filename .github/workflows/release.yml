@@ -1,0 +1,50 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - uses: google-github-actions/release-please-action@v4
+        id: release
+        with:
+          release-type: go
+          package-name: file-syncer-cmp
+
+  build-and-upload:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.21"
+
+      - name: Build all targets
+        run: |
+          GOOS=linux  GOARCH=amd64 go build -o dist/file-syncer-cmp-linux-amd64  .
+          GOOS=linux  GOARCH=arm64 go build -o dist/file-syncer-cmp-linux-arm64  .
+          GOOS=darwin GOARCH=amd64 go build -o dist/file-syncer-cmp-darwin-amd64 .
+          GOOS=darwin GOARCH=arm64 go build -o dist/file-syncer-cmp-darwin-arm64 .
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.release-please.outputs.tag_name }}
+          files: |
+            dist/file-syncer-cmp-linux-amd64
+            dist/file-syncer-cmp-linux-arm64
+            dist/file-syncer-cmp-darwin-amd64
+            dist/file-syncer-cmp-darwin-arm64
