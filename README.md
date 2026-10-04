@@ -72,7 +72,7 @@ On subsequent runs, skip unchanged dirs with `--incremental`:
 ./file-syncer-cmp-linux-arm64 scan /volume2/data /volume1/home --output nas.json --incremental
 ```
 
-Scan output shows per-root timing and a summary:
+Scan output shows live file count during scanning, per-root timing, and a summary:
 
 ```
   ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
@@ -85,6 +85,22 @@ Scan output shows per-root timing and a summary:
   ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
 ✓  315,523 files across 2 roots  → /home/slm/nas.json  20.5s
   ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+```
+
+---
+
+During each rsync the TUI shows a compact progress display instead of raw output:
+
+```
+  → Law and Order SVU S20E07 Caretaker.mkv           [7/25]  (in flight)
+```
+
+Completed files print with `✓`, speed, and file index:
+
+```
+  ✓ Law and Order SVU S20E01 Man Up.mkv               [1/25]  10.0MB/s
+  ✓ Law and Order SVU S20E02 Man Down.mkv              [2/25]   9.9MB/s
+  → Law and Order SVU S20E03 Zero Tolerance.mkv        [3/25]
 ```
 
 ---
