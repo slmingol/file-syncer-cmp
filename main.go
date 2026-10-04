@@ -767,7 +767,21 @@ type tuiDir struct {
 	disk     string
 	dir      string
 	count    int
+	size     int64
 	disabled bool // visible but not selectable (e.g. auto-managed dirs)
+}
+
+func fmtSize(n int64) string {
+	switch {
+	case n >= 1<<30:
+		return fmt.Sprintf("%.1f GB", float64(n)/float64(1<<30))
+	case n >= 1<<20:
+		return fmt.Sprintf("%.1f MB", float64(n)/float64(1<<20))
+	case n >= 1<<10:
+		return fmt.Sprintf("%.1f KB", float64(n)/float64(1<<10))
+	default:
+		return fmt.Sprintf("%d B", n)
+	}
 }
 
 func buildTUIDirs(missing []FileRecord) []tuiDir {
@@ -775,6 +789,7 @@ func buildTUIDirs(missing []FileRecord) []tuiDir {
 	var order []key
 	seen := map[key]bool{}
 	counts := map[key]int{}
+	sizes := map[key]int64{}
 	for _, f := range missing {
 		root := f.SourceIndex
 		if root == "" {
@@ -787,10 +802,11 @@ func buildTUIDirs(missing []FileRecord) []tuiDir {
 			order = append(order, k)
 		}
 		counts[k]++
+		sizes[k] += f.Size
 	}
 	raw := make([]tuiDir, len(order))
 	for i, k := range order {
-		raw[i] = tuiDir{disk: k.disk, dir: k.dir, count: counts[k]}
+		raw[i] = tuiDir{disk: k.disk, dir: k.dir, count: counts[k], size: sizes[k]}
 	}
 
 	// Drop any entry whose path is a strict parent of another entry.
@@ -894,13 +910,19 @@ func runTUI(result *CompareResult, rsyncScript, rsyncSrcRoot, noSelect string) {
 		fmt.Fprint(out, "\033[H\033[2J") // clear
 
 		nSel := 0
-		for _, s := range selected {
+		var selSize int64
+		for i, s := range selected {
 			if s {
 				nSel++
+				selSize += dirs[i].size
 			}
 		}
 
-		fmt.Fprintf(out, "\033[1;36m File Sync TUI\033[0m  %d missing files · %d dirs · \033[33m%d selected\033[0m\r\n", len(result.Missing), len(dirs), nSel)
+		selInfo := fmt.Sprintf("\033[33m%d selected\033[0m", nSel)
+		if nSel > 0 {
+			selInfo = fmt.Sprintf("\033[33m%d selected  %s\033[0m", nSel, fmtSize(selSize))
+		}
+		fmt.Fprintf(out, "\033[1;36m File Sync TUI\033[0m  %d missing files · %d dirs · %s\r\n", len(result.Missing), len(dirs), selInfo)
 		fmt.Fprintf(out, "\033[90m ↑↓ move · SPACE toggle · a=all  n=none · ENTER run · q quit\033[0m\r\n")
 		fmt.Fprintf(out, "\033[90m%s\033[0m\r\n", strings.Repeat("─", termW-1))
 
@@ -922,16 +944,16 @@ func runTUI(result *CompareResult, rsyncScript, rsyncSrcRoot, noSelect string) {
 				cc = "\033[90m"
 			}
 			label := d.dir
-			maxLabel := termW - 14
+			maxLabel := termW - 26 // room for check + size annotation
 			if len(label) > maxLabel {
 				label = "…" + label[len(label)-maxLabel+1:]
 			}
+			meta := fmt.Sprintf("\033[90m(%d · %s)\033[0m", d.count, fmtSize(d.size))
 			if i == cursor {
-				// Subtle blue-gray bg, bold label, cyan arrow prefix.
-				fmt.Fprintf(out, "\033[48;5;237m\033[1m\033[36m▶ \033[0m\033[48;5;237m%s%s\033[0m\033[48;5;237m %s  \033[90m(%d)\033[0m\r\n",
-					cc, check, label, d.count)
+				fmt.Fprintf(out, "\033[48;5;237m\033[1m\033[36m▶ \033[0m\033[48;5;237m%s%s\033[0m\033[48;5;237m %s  %s\033[0m\r\n",
+					cc, check, label, meta)
 			} else {
-				fmt.Fprintf(out, "  %s%s\033[0m %s  \033[90m(%d)\033[0m\r\n", cc, check, label, d.count)
+				fmt.Fprintf(out, "  %s%s\033[0m %s  %s\r\n", cc, check, label, meta)
 			}
 		}
 
