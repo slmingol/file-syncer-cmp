@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -11,8 +12,10 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/term"
@@ -94,6 +97,17 @@ func fmtCount(n int) string {
 
 // reEpisode matches SxxExx / SxxExxExx patterns (e.g. S01E02, S01E01E02).
 var reEpisode = regexp.MustCompile(`(?i)s\d{1,2}e\d{1,2}(?:e\d{1,2})?`)
+
+// reRsyncStats matches rsync per-file stats lines: speed + (xfr#N, to-chk=M/T)
+var reRsyncStats = regexp.MustCompile(`([\d.]+\s*\w+/s)\s+([\d:]+)\s+\(xfr#(\d+),\s*to-chk=(\d+)/(\d+)\)`)
+
+func truncateName(s string, max int) string {
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max-3]) + "..."
+}
 
 // stripEpisode removes episode codes and collapses extra whitespace.
 func stripEpisode(name string) string {
@@ -238,7 +252,6 @@ func cmdScan(args []string) {
 	var indexes []*Index
 	for _, root := range posArgs {
 		rt := time.Now()
-		fmt.Fprintf(os.Stderr, "  scanning %s ...", root)
 		// For multi-root incremental, filter base to this root only.
 		var base *Index
 		if baseIndex != nil {
@@ -250,7 +263,25 @@ func cmdScan(args []string) {
 			}
 			base = &Index{Root: root, ScannedAt: baseIndex.ScannedAt, Files: kept}
 		}
-		idx, err := scanWithBase(root, exts, *doHash, *workers, base)
+		var scanN atomic.Int64
+		stopTicker := make(chan struct{})
+		go func() {
+			t := time.NewTicker(150 * time.Millisecond)
+			defer t.Stop()
+			for {
+				select {
+				case <-t.C:
+					n := scanN.Load()
+					fmt.Fprintf(os.Stderr, "\r  scanning %-42s  %s files", root, fmtCount(int(n)))
+				case <-stopTicker:
+					return
+				}
+			}
+		}()
+		idx, err := scanWithBase(root, exts, *doHash, *workers, base, func(n int) {
+			scanN.Store(int64(n))
+		})
+		close(stopTicker)
 		if err != nil {
 			fatal(err)
 		}
@@ -434,10 +465,10 @@ func cmdSyncCheck(args []string) {
 // ---------- scan implementation ----------
 
 func scan(root string, exts map[string]bool, doHash bool, workers int) (*Index, error) {
-	return scanWithBase(root, exts, doHash, workers, nil)
+	return scanWithBase(root, exts, doHash, workers, nil, nil)
 }
 
-func scanWithBase(root string, exts map[string]bool, doHash bool, workers int, base *Index) (*Index, error) {
+func scanWithBase(root string, exts map[string]bool, doHash bool, workers int, base *Index, onProgress func(int)) (*Index, error) {
 	// Build per-dir lookup from old index for incremental mode.
 	type job struct {
 		path string
@@ -523,6 +554,9 @@ func scanWithBase(root string, exts map[string]bool, doHash bool, workers int, b
 	var files []FileRecord
 	for r := range results {
 		files = append(files, r)
+		if onProgress != nil {
+			onProgress(len(files))
+		}
 	}
 	files = append(files, reused...)
 
@@ -1100,11 +1134,20 @@ func tuiRunSelected(dirs []tuiDir, selected []bool, rsyncScript string) map[int]
 				ran[idx] = true
 			}
 			cmd := exec.Command(rsyncScript, item.path)
-			cmd.Stdout = os.Stdout
+			pr, pw := io.Pipe()
+			cmd.Stdout = pw
 			cmd.Stderr = os.Stderr
+			var hudWg sync.WaitGroup
+			hudWg.Add(1)
+			go func() {
+				defer hudWg.Done()
+				rsyncHUD(pr)
+			}()
 			if err := cmd.Run(); err != nil {
 				fmt.Fprintf(os.Stderr, "\033[31mrsync failed:\033[0m %v\n", err)
 			}
+			pw.Close()
+			hudWg.Wait()
 		}
 	}
 	fmt.Printf("\n%s\nDone. %d skipped.\nPress Enter to return to TUI...", sep, skipped)
@@ -1140,6 +1183,57 @@ func filterIgnored(result *CompareResult, ignore string) {
 		}
 	}
 	result.Missing = keep
+}
+
+// rsyncHUD reads rsync stdout, suppresses raw scroll, and shows a compact live display:
+// completed files print with ✓, the in-flight file updates in place with →.
+func rsyncHUD(r io.Reader) {
+	sc := bufio.NewScanner(r)
+	var pendingFile string
+	inFlight := false
+
+	flush := func() {
+		if inFlight {
+			fmt.Println()
+			inFlight = false
+		}
+	}
+
+	for sc.Scan() {
+		line := sc.Text()
+		stripped := strings.TrimSpace(line)
+		if stripped == "" {
+			continue
+		}
+		// Skip rsync preamble / summary lines.
+		if strings.HasPrefix(stripped, "sending ") ||
+			strings.HasPrefix(stripped, "sent ") ||
+			strings.HasPrefix(stripped, "total size") ||
+			strings.HasPrefix(stripped, "created directory") ||
+			strings.HasSuffix(stripped, "/") {
+			continue
+		}
+		// Stats line: bytes% speed eta (xfr#N, to-chk=M/T)
+		if m := reRsyncStats.FindStringSubmatch(stripped); m != nil {
+			speed := m[1]
+			n, _ := strconv.Atoi(m[3])
+			remaining, _ := strconv.Atoi(m[4])
+			total, _ := strconv.Atoi(m[5])
+			done := total - remaining
+			name := filepath.Base(pendingFile)
+			fmt.Printf("\r  \033[32m✓\033[0m %-55s \033[90m[%d/%d]  %s\033[0m\n",
+				truncateName(name, 55), n, done+1, speed)
+			inFlight = false
+			pendingFile = ""
+			continue
+		}
+		// Filename line.
+		pendingFile = stripped
+		name := filepath.Base(stripped)
+		fmt.Printf("\r  \033[33m→\033[0m %-55s", truncateName(name, 55))
+		inFlight = true
+	}
+	flush()
 }
 
 // rsyncCommands builds deduplicated ~/rsync.sh commands for missing files,
