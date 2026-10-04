@@ -832,6 +832,20 @@ func tuiRunSelected(dirs []tuiDir, selected []bool, rsyncScript string) {
 			fmt.Printf("Run? [y/a/N/q] ")
 			var resp [1]byte
 			os.Stdin.Read(resp[:])
+			// Drain the rest of the line (the \n the user typed after the key).
+			var drain [256]byte
+			for {
+				n, _ := os.Stdin.Read(drain[:])
+				done := false
+				for _, b := range drain[:n] {
+					if b == '\n' || b == '\r' {
+						done = true
+					}
+				}
+				if done || n == 0 {
+					break
+				}
+			}
 			fmt.Println()
 			switch resp[0] {
 			case 'y', 'Y':
@@ -853,7 +867,8 @@ func tuiRunSelected(dirs []tuiDir, selected []bool, rsyncScript string) {
 			cmd := exec.Command(rsyncScript, d.dir)
 			cmd.Stdout = os.Stdout
 			cmd.Stderr = os.Stderr
-			cmd.Stdin = os.Stdin
+			// No stdin — rsync doesn't need it and passing os.Stdin
+			// causes it to consume buffered input, skipping the next prompt.
 			if err := cmd.Run(); err != nil {
 				fmt.Fprintf(os.Stderr, "\033[31mrsync failed:\033[0m %v\n", err)
 			}
