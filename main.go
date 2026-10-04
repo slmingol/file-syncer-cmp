@@ -83,6 +83,15 @@ type FuzzyPair struct {
 	Reason    string     `json:"reason"` // "substring" or "episode-renumbered"
 }
 
+// fmtCount formats an integer with comma thousands separators.
+func fmtCount(n int) string {
+	s := fmt.Sprintf("%d", n)
+	for i := len(s) - 3; i > 0; i -= 3 {
+		s = s[:i] + "," + s[i:]
+	}
+	return s
+}
+
 // reEpisode matches SxxExx / SxxExxExx patterns (e.g. S01E02, S01E01E02).
 var reEpisode = regexp.MustCompile(`(?i)s\d{1,2}e\d{1,2}(?:e\d{1,2})?`)
 
@@ -228,7 +237,7 @@ func cmdScan(args []string) {
 	var indexes []*Index
 	for _, root := range posArgs {
 		rt := time.Now()
-		fmt.Fprintf(os.Stderr, "scanning %s ...\n", root)
+		fmt.Fprintf(os.Stderr, "  scanning %s ...", root)
 		// For multi-root incremental, filter base to this root only.
 		var base *Index
 		if baseIndex != nil {
@@ -244,7 +253,9 @@ func cmdScan(args []string) {
 		if err != nil {
 			fatal(err)
 		}
-		fmt.Fprintf(os.Stderr, "  \033[90m→\033[0m \033[1m%d files\033[0m  \033[90m%s\033[0m\n", len(idx.Files), time.Since(rt).Round(time.Millisecond))
+		elapsed := time.Since(rt).Round(time.Millisecond)
+		fmt.Fprintf(os.Stderr, "\r  \033[36m%-42s\033[0m  \033[1m%s files\033[0m  \033[90m%s\033[0m\n",
+			root, fmtCount(len(idx.Files)), elapsed)
 		indexes = append(indexes, idx)
 	}
 
@@ -259,7 +270,6 @@ func cmdScan(args []string) {
 			roots[i] = idx.Root
 		}
 		combined.Root = strings.Join(roots, ", ")
-		fmt.Fprintf(os.Stderr, "  \033[90m→\033[0m merged %d roots, \033[1m%d files total\033[0m\n", len(indexes), len(combined.Files))
 	}
 
 	data, err := json.MarshalIndent(combined, "", "  ")
@@ -267,6 +277,7 @@ func cmdScan(args []string) {
 		fatal(err)
 	}
 
+	dest := "(stdout)"
 	if *output == "" {
 		os.Stdout.Write(data)
 		fmt.Println()
@@ -274,9 +285,18 @@ func cmdScan(args []string) {
 		if err := os.WriteFile(*output, data, 0644); err != nil {
 			fatal(err)
 		}
-		fmt.Fprintf(os.Stderr, "  \033[90m→\033[0m wrote %s\n", *output)
+		dest = *output
 	}
-	fmt.Fprintf(os.Stderr, "\033[1;32m✓ scan done\033[0m  \033[1m%s\033[0m\n", time.Since(t0).Round(time.Millisecond))
+
+	total := fmtCount(len(combined.Files))
+	elapsed := time.Since(t0).Round(time.Millisecond)
+	if len(indexes) > 1 {
+		fmt.Fprintf(os.Stderr, "\033[1;32m✓\033[0m  \033[1m%s files\033[0m across %d roots  \033[90m→ %s\033[0m  \033[1m%s\033[0m\n",
+			total, len(indexes), dest, elapsed)
+	} else {
+		fmt.Fprintf(os.Stderr, "\033[1;32m✓\033[0m  \033[1m%s files\033[0m  \033[90m→ %s\033[0m  \033[1m%s\033[0m\n",
+			total, dest, elapsed)
+	}
 }
 
 // ---------- compare ----------
@@ -321,9 +341,9 @@ func cmdCompare(args []string) {
 	ct := time.Now()
 	result := compare(src, dst, *doHash, *doFuzzy)
 	filterIgnored(result, *ignoreFlag)
-	fmt.Fprintf(os.Stderr, "\033[1;32m✓ compare done\033[0m  \033[1m%s\033[0m  \033[31m%d missing\033[0m  \033[33m%d fuzzy\033[0m  \033[90m%d size-mismatch\033[0m\n",
+	fmt.Fprintf(os.Stderr, "\033[1;32m✓\033[0m  \033[1m%s\033[0m  \033[31m%s missing\033[0m  \033[33m%s fuzzy\033[0m  \033[90m%s size-mismatch\033[0m\n",
 		time.Since(ct).Round(time.Millisecond),
-		len(result.Missing), len(result.FuzzyMatch), len(result.SizeMismatch))
+		fmtCount(len(result.Missing)), fmtCount(len(result.FuzzyMatch)), fmtCount(len(result.SizeMismatch)))
 	if *doTUI {
 		runTUI(result, resolveRsyncScript(*rsyncScript), *noSelectFlag)
 	} else {
@@ -375,31 +395,33 @@ func cmdSyncCheck(args []string) {
 	var srcIndexes []*Index
 	for _, p := range srcPaths {
 		rt := time.Now()
-		fmt.Fprintf(os.Stderr, "scanning source: %s\n", p)
+		fmt.Fprintf(os.Stderr, "  scanning %s ...", p)
 		idx, err := scan(p, exts, *doHash, *workers)
 		if err != nil {
 			fatal(err)
 		}
-		fmt.Fprintf(os.Stderr, "  \033[90m→\033[0m \033[1m%d files\033[0m  \033[90m%s\033[0m\n", len(idx.Files), time.Since(rt).Round(time.Millisecond))
+		fmt.Fprintf(os.Stderr, "\r  \033[36m%-42s\033[0m  \033[1m%s files\033[0m  \033[90m%s\033[0m\n",
+			p, fmtCount(len(idx.Files)), time.Since(rt).Round(time.Millisecond))
 		srcIndexes = append(srcIndexes, idx)
 	}
 
 	dt := time.Now()
-	fmt.Fprintf(os.Stderr, "scanning dest: %s\n", destPath)
+	fmt.Fprintf(os.Stderr, "  scanning %s ...", destPath)
 	dst, err := scan(destPath, exts, *doHash, *workers)
 	if err != nil {
 		fatal(err)
 	}
-	fmt.Fprintf(os.Stderr, "  \033[90m→\033[0m \033[1m%d files\033[0m  \033[90m%s\033[0m\n", len(dst.Files), time.Since(dt).Round(time.Millisecond))
-	fmt.Fprintf(os.Stderr, "\033[1;32m✓ scan done\033[0m  \033[1m%s\033[0m\n", time.Since(sc0).Round(time.Millisecond))
+	fmt.Fprintf(os.Stderr, "\r  \033[36m%-42s\033[0m  \033[1m%s files\033[0m  \033[90m%s\033[0m\n",
+		destPath, fmtCount(len(dst.Files)), time.Since(dt).Round(time.Millisecond))
+	fmt.Fprintf(os.Stderr, "\033[1;32m✓\033[0m  scan done  \033[1m%s\033[0m\n", time.Since(sc0).Round(time.Millisecond))
 
 	src := mergeIndexes(srcIndexes)
 	ct := time.Now()
 	result := compare(src, dst, *doHash, *doFuzzy)
 	filterIgnored(result, *ignoreFlag)
-	fmt.Fprintf(os.Stderr, "\033[1;32m✓ compare done\033[0m  \033[1m%s\033[0m  \033[31m%d missing\033[0m  \033[33m%d fuzzy\033[0m  \033[90m%d size-mismatch\033[0m\n",
+	fmt.Fprintf(os.Stderr, "\033[1;32m✓\033[0m  \033[1m%s\033[0m  \033[31m%s missing\033[0m  \033[33m%s fuzzy\033[0m  \033[90m%s size-mismatch\033[0m\n",
 		time.Since(ct).Round(time.Millisecond),
-		len(result.Missing), len(result.FuzzyMatch), len(result.SizeMismatch))
+		fmtCount(len(result.Missing)), fmtCount(len(result.FuzzyMatch)), fmtCount(len(result.SizeMismatch)))
 	if *doTUI {
 		runTUI(result, resolveRsyncScript(*rsyncScript), *noSelectFlag)
 	} else {
