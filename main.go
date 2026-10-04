@@ -224,8 +224,10 @@ func cmdScan(args []string) {
 		}
 	}
 
+	t0 := time.Now()
 	var indexes []*Index
 	for _, root := range posArgs {
+		rt := time.Now()
 		fmt.Fprintf(os.Stderr, "scanning %s ...\n", root)
 		// For multi-root incremental, filter base to this root only.
 		var base *Index
@@ -242,7 +244,7 @@ func cmdScan(args []string) {
 		if err != nil {
 			fatal(err)
 		}
-		fmt.Fprintf(os.Stderr, "found %d files\n", len(idx.Files))
+		fmt.Fprintf(os.Stderr, "found %d files in %s\n", len(idx.Files), time.Since(rt).Round(time.Millisecond))
 		indexes = append(indexes, idx)
 	}
 
@@ -258,6 +260,7 @@ func cmdScan(args []string) {
 		}
 		combined.Root = strings.Join(roots, ", ")
 		fmt.Fprintf(os.Stderr, "merged %d roots, %d files total\n", len(indexes), len(combined.Files))
+
 	}
 
 	data, err := json.MarshalIndent(combined, "", "  ")
@@ -274,6 +277,7 @@ func cmdScan(args []string) {
 		}
 		fmt.Fprintf(os.Stderr, "wrote %s\n", *output)
 	}
+	fmt.Fprintf(os.Stderr, "scan done in %s\n", time.Since(t0).Round(time.Millisecond))
 }
 
 // ---------- compare ----------
@@ -314,8 +318,12 @@ func cmdCompare(args []string) {
 	}
 
 	src := mergeIndexes(srcIndexes)
+	ct := time.Now()
 	result := compare(src, dst, *doHash, *doFuzzy)
 	filterIgnored(result, *ignoreFlag)
+	fmt.Fprintf(os.Stderr, "compare done in %s — %d missing, %d fuzzy, %d size-mismatch\n",
+		time.Since(ct).Round(time.Millisecond),
+		len(result.Missing), len(result.FuzzyMatch), len(result.SizeMismatch))
 	if *doTUI {
 		runTUI(result, resolveRsyncScript(*rsyncScript))
 	} else {
@@ -362,27 +370,35 @@ func cmdSyncCheck(args []string) {
 		os.Exit(1)
 	}
 
+	sc0 := time.Now()
 	var srcIndexes []*Index
 	for _, p := range srcPaths {
+		rt := time.Now()
 		fmt.Fprintf(os.Stderr, "scanning source: %s\n", p)
 		idx, err := scan(p, exts, *doHash, *workers)
 		if err != nil {
 			fatal(err)
 		}
-		fmt.Fprintf(os.Stderr, "found %d files\n", len(idx.Files))
+		fmt.Fprintf(os.Stderr, "found %d files in %s\n", len(idx.Files), time.Since(rt).Round(time.Millisecond))
 		srcIndexes = append(srcIndexes, idx)
 	}
 
+	dt := time.Now()
 	fmt.Fprintf(os.Stderr, "scanning dest: %s\n", destPath)
 	dst, err := scan(destPath, exts, *doHash, *workers)
 	if err != nil {
 		fatal(err)
 	}
-	fmt.Fprintf(os.Stderr, "found %d files in dest\n", len(dst.Files))
+	fmt.Fprintf(os.Stderr, "found %d files in dest in %s\n", len(dst.Files), time.Since(dt).Round(time.Millisecond))
+	fmt.Fprintf(os.Stderr, "scan done in %s\n", time.Since(sc0).Round(time.Millisecond))
 
 	src := mergeIndexes(srcIndexes)
+	ct := time.Now()
 	result := compare(src, dst, *doHash, *doFuzzy)
 	filterIgnored(result, *ignoreFlag)
+	fmt.Fprintf(os.Stderr, "compare done in %s — %d missing, %d fuzzy, %d size-mismatch\n",
+		time.Since(ct).Round(time.Millisecond),
+		len(result.Missing), len(result.FuzzyMatch), len(result.SizeMismatch))
 	if *doTUI {
 		runTUI(result, resolveRsyncScript(*rsyncScript))
 	} else {
