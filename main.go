@@ -1143,7 +1143,8 @@ func runRsyncHUD(items []runItem, rsyncScript string, inputCh <-chan []byte) map
 						evCh <- rsyncEv{fileOK: fmt.Sprintf("%-52s \033[90m[%d/%d]  %s\033[0m",
 							truncateName(name, 52), n, total, m[1])}
 						pending = ""
-					} else {
+					} else if filepath.Ext(filepath.Base(line)) != "" {
+						// Only treat as in-flight if it looks like a file (has extension).
 						pending = line
 						evCh <- rsyncEv{inFlight: truncateName(filepath.Base(line), 60)}
 					}
@@ -1157,6 +1158,7 @@ func runRsyncHUD(items []runItem, rsyncScript string, inputCh <-chan []byte) map
 			}
 			mu.Lock()
 			hs.doneIdx[i] = true
+			hs.inFlight = ""
 			mu.Unlock()
 		}
 	}()
@@ -1173,10 +1175,10 @@ func runRsyncHUD(items []runItem, rsyncScript string, inputCh <-chan []byte) map
 			termH = 24
 		}
 		rule := strings.Repeat("┄", termW-4)
-		fmt.Fprint(os.Stdout, "\033[H\033[2J")
+		fmt.Fprint(os.Stdout, "\033[H") // home cursor; no clear (avoids flicker)
 
 		// ── header ──
-		fmt.Fprintf(os.Stdout, "\033[90m  %s\033[0m\r\n", rule)
+		fmt.Fprintf(os.Stdout, "\033[90m  %s\033[0m\033[K\r\n", rule)
 		statusLabel := "\033[1;36mrsyncing\033[0m"
 		if h.allDone {
 			statusLabel = "\033[1;32mdone\033[0m"
@@ -1187,9 +1189,9 @@ func runRsyncHUD(items []runItem, rsyncScript string, inputCh <-chan []byte) map
 		if h.dirIdx >= 0 {
 			dirLabel = fmt.Sprintf("  \033[90m[%d/%d]\033[0m", h.dirIdx+1, len(items))
 		}
-		fmt.Fprintf(os.Stdout, "  %s%s  \033[90m%s\033[0m\r\n",
+		fmt.Fprintf(os.Stdout, "  %s%s  \033[90m%s\033[0m\033[K\r\n",
 			statusLabel, dirLabel, truncateName(h.dirPath, termW-30))
-		fmt.Fprintf(os.Stdout, "\033[90m  %s\033[0m\r\n\r\n", rule)
+		fmt.Fprintf(os.Stdout, "\033[90m  %s\033[0m\033[K\r\n\033[K\r\n", rule)
 
 		// ── file progress (top half) ──
 		// Reserve: 4 header rows + 1 blank + 1 separator + N queue rows + 1 blank + 1 hint
@@ -1212,14 +1214,14 @@ func runRsyncHUD(items []runItem, rsyncScript string, inputCh <-chan []byte) map
 			completed = completed[len(completed)-showCompleted:]
 		}
 		for _, f := range completed {
-			fmt.Fprintf(os.Stdout, "  \033[32m✓\033[0m %s\r\n", f)
+			fmt.Fprintf(os.Stdout, "  \033[32m✓\033[0m %s\033[K\r\n", f)
 		}
 		if h.inFlight != "" {
-			fmt.Fprintf(os.Stdout, "  \033[33m→\033[0m %s\r\n", h.inFlight)
+			fmt.Fprintf(os.Stdout, "  \033[33m→\033[0m %s\033[K\r\n", h.inFlight)
 		}
 
 		// ── queue separator ──
-		fmt.Fprintf(os.Stdout, "\r\n\033[90m  %s\033[0m\r\n", rule)
+		fmt.Fprintf(os.Stdout, "\033[K\r\n\033[90m  %s\033[0m\033[K\r\n", rule)
 
 		// ── rsync queue ──
 		shown := 0
@@ -1236,17 +1238,18 @@ func runRsyncHUD(items []runItem, rsyncScript string, inputCh <-chan []byte) map
 			} else {
 				prefix = "\033[90m·\033[0m"
 			}
-			fmt.Fprintf(os.Stdout, "  %s \033[90m%s\033[0m\r\n", prefix, name)
+			fmt.Fprintf(os.Stdout, "  %s \033[90m%s\033[0m\033[K\r\n", prefix, name)
 			shown++
 		}
 
 		// ── hint ──
-		fmt.Fprintf(os.Stdout, "\r\n")
+		fmt.Fprintf(os.Stdout, "\033[K\r\n")
 		if h.allDone || h.aborted {
-			fmt.Fprintf(os.Stdout, "\033[90m  press any key to return\033[0m\r\n")
+			fmt.Fprintf(os.Stdout, "\033[90m  press any key to return\033[0m\033[K\r\n")
 		} else {
-			fmt.Fprintf(os.Stdout, "\033[90m  q abort\033[0m\r\n")
+			fmt.Fprintf(os.Stdout, "\033[90m  q abort\033[0m\033[K\r\n")
 		}
+		fmt.Fprint(os.Stdout, "\033[J") // clear from cursor to bottom
 	}
 
 	ticker := time.NewTicker(100 * time.Millisecond)
