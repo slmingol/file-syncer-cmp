@@ -5,7 +5,7 @@
 [![CI](https://github.com/slmingol/file-syncer-cmp/actions/workflows/ci.yml/badge.svg)](https://github.com/slmingol/file-syncer-cmp/actions/workflows/ci.yml)
 [![Release](https://github.com/slmingol/file-syncer-cmp/actions/workflows/release.yml/badge.svg)](https://github.com/slmingol/file-syncer-cmp/actions/workflows/release.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/slmingol/file-syncer-cmp)](https://goreportcard.com/report/github.com/slmingol/file-syncer-cmp)
-![Go Version](https://img.shields.io/badge/go-1.21+-00ADD8?logo=go)
+![Go Version](https://img.shields.io/badge/go-1.26+-00ADD8?logo=go)
 ![Platforms](https://img.shields.io/badge/platform-linux%20%7C%20darwin-lightgrey)
 ![Arch](https://img.shields.io/badge/arch-amd64%20%7C%20arm64-blue)
 
@@ -31,7 +31,14 @@ chmod +x file-syncer-cmp-linux-arm64
 mv file-syncer-cmp-linux-arm64 /usr/local/bin/file-syncer-cmp
 ```
 
-Or build from source (requires Go 1.21+):
+Or via Homebrew (macOS):
+
+```bash
+brew tap slmingol/tap
+brew install file-syncer-cmp
+```
+
+Or build from source (requires Go 1.26+):
 
 ```bash
 go install github.com/slmingol/file-syncer-cmp@latest
@@ -39,91 +46,112 @@ go install github.com/slmingol/file-syncer-cmp@latest
 
 ---
 
-## Usage
-
-### Two-phase (recommended — server and NAS not mounted at the same time)
+## Typical workflow (Transmission → NAS)
 
 ```bash
-# On the Transmission server, for each disk:
-file-syncer-cmp scan /mnt/disk1 --output disk1.json
-file-syncer-cmp scan /mnt/disk2 --output disk2.json
+# 1. On the NAS — scan all media locations into one index:
+./file-syncer-cmp-linux-arm64 scan /volume2/data /volume1/home --output nas.json
 
-# Scan the NAS once:
-file-syncer-cmp scan /volume1/media --output nas.json
+# 2. Copy nas.json to the Transmission host:
+scp nas:/home/slm/nas.json ~/
 
-# Copy *.json files to a single machine, then compare:
-file-syncer-cmp compare disk1.json nas.json
-file-syncer-cmp compare disk2.json nas.json
+# 3. On the Transmission host — scan source disk(s):
+./file-syncer-cmp-linux-arm64 scan /mnt1/torrent-complete --output mnt1.json
 
-# HTML report:
-file-syncer-cmp compare disk1.json nas.json --format html > report.html
+# 4. Compare and launch the interactive TUI to selectively rsync:
+./file-syncer-cmp-linux-arm64 compare --dest nas.json mnt1.json \
+  --fuzzy \
+  --ignore 'RARBG*,www.*,*.nfo' \
+  --rsync-script ~/rsync.sh \
+  --tui
 ```
 
-### One-shot (both paths accessible at once)
+On subsequent runs, skip unchanged dirs with `--incremental`:
 
 ```bash
-file-syncer-cmp sync-check /mnt/disk1 /volume1/media
-file-syncer-cmp sync-check /mnt/disk1 /volume1/media --format html > report.html
-```
-
-### With hash verification
-
-Adds a partial content hash (first + last 512 KB) to catch corruption:
-
-```bash
-file-syncer-cmp scan /mnt/disk1 --output disk1.json --hash
-file-syncer-cmp scan /volume1/media --output nas.json --hash
-file-syncer-cmp compare disk1.json nas.json --hash
+./file-syncer-cmp-linux-arm64 scan /mnt1/torrent-complete --output mnt1.json --incremental
 ```
 
 ---
 
-## Output
+## Interactive TUI
 
-Three categories of findings:
+<p align="center">
+  <img src="assets/screenshot-tui.svg" alt="TUI screenshot" width="900"/>
+</p>
+
+Select which directories to sync, then confirm each one (or press `a` to run all):
+
+| Key | Action |
+|---|---|
+| `↑` / `↓` | Navigate |
+| `Space` | Toggle selection |
+| `a` | Select all |
+| `n` | Deselect all |
+| `Enter` | Run rsync for selected dirs |
+| `q` | Quit |
+
+At the rsync prompt:
+
+| Key | Action |
+|---|---|
+| `y` | Run this dir |
+| `a` | Run this and all remaining without prompting |
+| `N` | Skip this dir |
+| `q` | Quit |
+
+---
+
+## HTML Report
+
+<p align="center">
+  <img src="assets/screenshot-html.svg" alt="HTML report screenshot" width="900"/>
+</p>
+
+```bash
+file-syncer-cmp compare --dest nas.json mnt1.json mnt2.json \
+  --fuzzy --format html > report.html
+```
+
+Missing files are grouped by directory (collapsed by default — click to expand). The report includes a **Rsync Commands** section with pre-built `~/rsync.sh` calls for every missing directory, and a **Copy** button.
+
+---
+
+## Output categories
 
 | Category | Meaning |
 |---|---|
-| **Missing** | File exists in source, not found anywhere in dest by name |
+| **Missing** | File in source, not found anywhere in dest by name+size |
 | **Size mismatch** | Name found in dest but byte count differs (possible re-encode) |
 | **Hash mismatch** | Same name + size, different content — requires `--hash` |
+| **Fuzzy match** | Not an exact match but likely the same file — renamed or episode renumbered |
 
-Text output (default):
+Fuzzy match sub-reasons:
 
-```
-FILE SYNC REPORT
---------------------------------------------------------------------------------
-Source:  /mnt/disk1 (scanned 2026-10-03 14:22, 1842 files)
-Dest:    /volume1/media (scanned 2026-10-03 14:23, 1809 files)
---------------------------------------------------------------------------------
-
-MISSING FILES (3) - present in source, not found in dest:
-  [MISSING] artist/album/track03.flac  (48.2 MiB)
-  [MISSING] movies/film.mkv  (12.4 GiB)
-  [MISSING] podcasts/ep42.mp3  (31.1 MiB)
-
-SIZE MISMATCH (1) - name found in dest but different size:
-  [MISMATCH] concert.mkv
-    src: concerts/2023/concert.mkv  (8.1 GiB)
-    dst: video/concert.mkv  (7.9 GiB)
-
-SUMMARY: 3 missing, 1 size-mismatch, 0 hash-mismatch
-```
-
-Pass `--format html` for a styled report, `--format json` for machine-readable output.
+| Reason | Example |
+|---|---|
+| `substring` | Dest has `S01E01__Show Name.mkv`, source has `Show Name.mkv` |
+| `episode-renumbered` | Source `S01E02 Title.mkv` matched to dest `S01E03 Title.mkv` (dual-episode shifted numbering) |
 
 ---
 
-## Flags
+## All flags
 
 ### `scan`
 
 | Flag | Default | Description |
 |---|---|---|
-| `--output` | stdout | Write index to file instead of stdout |
-| `--ext` | media files | Comma-separated extensions to include, e.g. `mp3,flac,mkv` |
-| `--hash` | off | Compute partial hash of each file |
+| `--output` | stdout | Write index to file |
+| `--ext` | media files | Comma-separated extensions, e.g. `mp3,flac,mkv` |
+| `--hash` | off | Compute partial content hash (first + last 512 KB) |
 | `--workers` | 8 | Parallel scan workers |
+| `--incremental` | off | Reuse unchanged dirs from previous `--output` index |
+
+Multiple paths can be scanned into one index:
+
+```bash
+file-syncer-cmp scan /volume2/data /volume1/home --output nas.json
+```
 
 Default extensions: `mp3 flac wav aac ogg opus m4a wma alac aiff mkv mp4 avi mov m4v ts m2ts wmv webm vob iso nfo srt ass sub`
 
@@ -131,12 +159,27 @@ Default extensions: `mp3 flac wav aac ogg opus m4a wma alac aiff mkv mp4 avi mov
 
 | Flag | Default | Description |
 |---|---|---|
+| `--dest` | — | Destination index (required when passing multiple sources) |
 | `--format` | `text` | Output format: `text`, `json`, `html` |
 | `--hash` | off | Compare hashes (both indexes must include hashes) |
+| `--fuzzy` | off | Match renamed/renumbered files (substring + episode-strip) |
+| `--ignore` | — | Comma-separated filename globs to drop from missing, e.g. `RARBG*,www.*` |
+| `--tui` | off | Launch interactive TUI instead of printing report |
+| `--rsync-script` | `~/rsync.sh` | Script called with each selected directory path |
 
 ### `sync-check`
 
-Accepts all flags from both `scan` and `compare`.
+Accepts all flags from both `scan` and `compare`. Scans both sides and compares in one step (requires both paths to be accessible simultaneously).
+
+---
+
+## Two-phase vs one-shot
+
+| | Two-phase (`scan` + `compare`) | One-shot (`sync-check`) |
+|---|---|---|
+| Use when | Server and NAS not on same network simultaneously | Both paths mountable at once |
+| NAS scan | Run on NAS, copy JSON over | Not needed |
+| Incremental | Yes (`--incremental`) | No |
 
 ---
 
