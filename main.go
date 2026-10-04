@@ -954,6 +954,9 @@ func runTUI(result *CompareResult, rsyncScript string, noSelect string) {
 			if !dirs[cursor].disabled {
 				selected[cursor] = !selected[cursor]
 			}
+			if cursor < len(dirs)-1 {
+				cursor++
+			}
 		case b == 'a' || b == 'A':
 			for i := range selected {
 				if !dirs[i].disabled {
