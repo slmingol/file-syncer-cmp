@@ -92,6 +92,29 @@ func stripEpisode(name string) string {
 	return strings.Join(strings.Fields(s), " ")
 }
 
+// extractEpisodeKey returns "normalized-show-title::SxxExx" for files that
+// contain an episode code, so different encodes of the same episode match.
+// Returns "" if no episode code found.
+func extractEpisodeKey(name string) string {
+	loc := reEpisode.FindStringIndex(name)
+	if loc == nil {
+		return ""
+	}
+	code := strings.ToLower(reEpisode.FindString(name))
+	// Normalize the first episode code to SxxExx (drop second Exx for multi-ep).
+	code = regexp.MustCompile(`(s\d{1,2}e\d{1,2})e\d{1,2}`).ReplaceAllString(code, "$1")
+	// Title is everything before the episode code, lowercased and stripped of
+	// dots/underscores/brackets so "Mythic.Quest" == "Mythic Quest".
+	title := name[:loc[0]]
+	title = strings.ToLower(title)
+	title = regexp.MustCompile(`[._\[\](){}-]+`).ReplaceAllString(title, " ")
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return ""
+	}
+	return title + "::" + code
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		printUsage()
@@ -524,15 +547,17 @@ func compare(src, dst *Index, useHash bool, fuzzy bool) *CompareResult {
 
 	// Pre-compute fuzzy indexes once — O(m) setup, O(1) or O(k) lookup per miss.
 	var (
-		allDest    []FileRecord
-		destLow    []string         // lowercased name, parallel to allDest
-		byStripped map[string]int   // stripped name → first allDest index (O(1) tier-2)
-		destByExt  map[string][]int // ext → allDest indices (narrows tier-1 scan)
+		allDest      []FileRecord
+		destLow      []string         // lowercased name, parallel to allDest
+		byStripped   map[string]int   // stripped name → first allDest index (O(1) tier-2)
+		byEpisodeKey map[string]int   // "title::SxxExx" → first allDest index (O(1) tier-3)
+		destByExt    map[string][]int // ext → allDest indices (narrows tier-1 scan)
 	)
 	if fuzzy {
 		allDest = dst.Files
 		destLow = make([]string, len(allDest))
 		byStripped = make(map[string]int, len(allDest))
+		byEpisodeKey = make(map[string]int, len(allDest))
 		destByExt = make(map[string][]int, 32)
 		for i, f := range allDest {
 			destLow[i] = strings.ToLower(f.Name)
@@ -542,6 +567,11 @@ func compare(src, dst *Index, useHash bool, fuzzy bool) *CompareResult {
 			}
 			ext := strings.ToLower(f.Ext)
 			destByExt[ext] = append(destByExt[ext], i)
+			if ek := extractEpisodeKey(f.Name); ek != "" {
+				if _, exists := byEpisodeKey[ek]; !exists {
+					byEpisodeKey[ek] = i
+				}
+			}
 		}
 	}
 
@@ -584,6 +614,18 @@ func compare(src, dst *Index, useHash bool, fuzzy bool) *CompareResult {
 							f := allDest[idx]
 							best = &f
 							reason = "episode-renumbered"
+						}
+					}
+				}
+
+				// Tier 3: match on show-title + episode code only, ignoring encode/group.
+				// Catches same episode available in a different encode on dest.
+				if best == nil {
+					if ek := extractEpisodeKey(sf.Name); ek != "" {
+						if idx, ok := byEpisodeKey[ek]; ok {
+							f := allDest[idx]
+							best = &f
+							reason = "episode-reencoded"
 						}
 					}
 				}
