@@ -1122,6 +1122,11 @@ func runRsyncHUD(items []runItem, rsyncScript, rsyncSrcRoot string, inputCh <-ch
 		allDone   bool
 		aborted   bool
 		doneIdx   map[int]bool // which items are fully done
+		// live stats for current item
+		speed     string
+		xfrN      int
+		xfrT      int
+		itemStart time.Time
 	}
 	var mu sync.Mutex
 	hs := hudState{dirIdx: -1, doneIdx: map[int]bool{}}
@@ -1131,6 +1136,9 @@ func runRsyncHUD(items []runItem, rsyncScript, rsyncSrcRoot string, inputCh <-ch
 		setDir    string
 		fileOK    string
 		inFlight  string
+		speed     string
+		xfrN      int
+		xfrT      int
 	}
 	evCh := make(chan rsyncEv, 64)
 	abortCh := make(chan struct{}, 1)
@@ -1190,8 +1198,11 @@ func runRsyncHUD(items []runItem, rsyncScript, rsyncSrcRoot string, inputCh <-ch
 						n, _ := strconv.Atoi(m[3])
 						total, _ := strconv.Atoi(m[5])
 						name := filepath.Base(pending)
-						evCh <- rsyncEv{fileOK: fmt.Sprintf("%-52s \033[90m[%d/%d]  %s\033[0m",
-							truncateName(name, 52), n, total, m[1])}
+						evCh <- rsyncEv{
+							fileOK: fmt.Sprintf("%-52s \033[90m[%d/%d]  %s\033[0m",
+								truncateName(name, 52), n, total, m[1]),
+							speed: m[1], xfrN: n, xfrT: total,
+						}
 						pending = ""
 					} else if filepath.Ext(filepath.Base(line)) != "" {
 						// Only treat as in-flight if it looks like a file (has extension).
@@ -1241,15 +1252,45 @@ func runRsyncHUD(items []runItem, rsyncScript, rsyncSrcRoot string, inputCh <-ch
 		}
 		fmt.Fprintf(os.Stdout, "  %s%s  \033[90m%s\033[0m\033[K\r\n",
 			statusLabel, dirLabel, truncateName(h.dirPath, termW-30))
+
+		// ── stats line ──
+		if h.speed != "" || !h.itemStart.IsZero() {
+			elapsed := ""
+			if !h.itemStart.IsZero() {
+				d := time.Since(h.itemStart).Round(time.Second)
+				h2 := int(d.Hours())
+				m2 := int(d.Minutes()) % 60
+				s2 := int(d.Seconds()) % 60
+				if h2 > 0 {
+					elapsed = fmt.Sprintf("%d:%02d:%02d", h2, m2, s2)
+				} else {
+					elapsed = fmt.Sprintf("%d:%02d", m2, s2)
+				}
+			}
+			var parts []string
+			if h.xfrT > 0 {
+				parts = append(parts, fmt.Sprintf("files %d/%d", h.xfrN, h.xfrT))
+			}
+			if h.speed != "" {
+				parts = append(parts, h.speed)
+			}
+			if elapsed != "" {
+				parts = append(parts, "elapsed "+elapsed)
+			}
+			fmt.Fprintf(os.Stdout, "  \033[90m%s\033[0m\033[K\r\n", strings.Join(parts, "  ·  "))
+		} else {
+			fmt.Fprintf(os.Stdout, "\033[K\r\n")
+		}
+
 		fmt.Fprintf(os.Stdout, "\033[90m  %s\033[0m\033[K\r\n\033[K\r\n", rule)
 
 		// ── file progress (bottom-aligned so in-flight always sits above separator) ──
-		// Reserve: 4 header rows + 1 blank + 1 separator + N queue rows + 1 blank + 1 hint
+		// Reserve: 5 header rows + 1 blank + 1 separator + N queue rows + 1 blank + 1 hint
 		queueRows := len(items)
 		if queueRows > 6 {
 			queueRows = 6
 		}
-		fixedRows := 4 + 1 + 1 + queueRows + 1 + 1
+		fixedRows := 5 + 1 + 1 + queueRows + 1 + 1
 		fileRows := termH - fixedRows
 		if fileRows < 2 {
 			fileRows = 2
@@ -1328,10 +1369,17 @@ func runRsyncHUD(items []runItem, rsyncScript, rsyncSrcRoot string, inputCh <-ch
 				hs.dirIdx = ev.setDirIdx
 				hs.dirPath = ev.setDir
 				hs.inFlight = ""
+				hs.speed = ""
+				hs.xfrN = 0
+				hs.xfrT = 0
+				hs.itemStart = time.Now()
 			}
 			if ev.fileOK != "" {
 				hs.completed = append(hs.completed, ev.fileOK)
 				hs.inFlight = ""
+				hs.speed = ev.speed
+				hs.xfrN = ev.xfrN
+				hs.xfrT = ev.xfrT
 			}
 			if ev.inFlight != "" {
 				hs.inFlight = ev.inFlight
