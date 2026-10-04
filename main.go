@@ -1017,6 +1017,7 @@ func runTUI(result *CompareResult, rsyncScript, rsyncSrcRoot, noSelect string) {
 // runItem is one rsync invocation: a path + the original dir indices it covers.
 type runItem struct {
 	path    string
+	disk    string // source root (tuiDir.disk); used as cwd when calling rsync script
 	indices []int
 }
 
@@ -1026,7 +1027,7 @@ func buildRsyncItems(dirs []tuiDir, selected []bool) []runItem {
 	var items []runItem
 	for i, d := range dirs {
 		if selected[i] {
-			items = append(items, runItem{path: d.dir, indices: []int{i}})
+			items = append(items, runItem{path: d.dir, disk: d.disk, indices: []int{i}})
 		}
 	}
 	isTooShallow := func(p string) bool {
@@ -1050,7 +1051,7 @@ func buildRsyncItems(dirs []tuiDir, selected []bool) []runItem {
 				if m, ok := merged[p]; ok {
 					m.indices = append(m.indices, it.indices...)
 				} else {
-					cp := runItem{path: p, indices: append([]int(nil), it.indices...)}
+					cp := runItem{path: p, disk: it.disk, indices: append([]int(nil), it.indices...)}
 					merged[p] = &cp
 					next = append(next, cp)
 				}
@@ -1119,10 +1120,15 @@ func runRsyncHUD(items []runItem, rsyncScript, rsyncSrcRoot string, inputCh <-ch
 			default:
 			}
 			evCh <- rsyncEv{setDirIdx: i, setDir: item.path}
+			// Determine source root: explicit flag overrides per-item disk.
+			srcRoot := rsyncSrcRoot
+			if srcRoot == "" {
+				srcRoot = item.disk
+			}
 			srcArg := item.path
 			var cmdDir string
-			if rsyncSrcRoot != "" {
-				root := filepath.Clean(rsyncSrcRoot)
+			if srcRoot != "" && srcRoot != "." {
+				root := filepath.Clean(srcRoot)
 				rel := strings.TrimPrefix(filepath.Clean(item.path), root+string(filepath.Separator))
 				if rel != filepath.Clean(item.path) {
 					// Run script from source root with relative path so rsync
