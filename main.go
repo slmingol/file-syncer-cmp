@@ -911,12 +911,79 @@ func tuiRunSelected(dirs []tuiDir, selected []bool, rsyncScript string) map[int]
 	always := false
 	ran := map[int]bool{}
 
+	// Coalesce siblings: if >1 selected dirs share the same parent, rsync the
+	// parent once instead of each child separately. Repeat until stable so
+	// deeply nested groups (e.g. artist/album/*) collapse all the way up.
+	type runItem struct {
+		path    string // path passed to rsync script
+		indices []int  // original dir indices this item covers
+	}
+
+	// Seed with one item per selected dir.
+	var items []runItem
 	for i, d := range dirs {
-		if !selected[i] {
-			continue
+		if selected[i] {
+			items = append(items, runItem{path: d.dir, indices: []int{i}})
 		}
-		fmt.Printf("\n%s\n\033[1;33m%s\033[0m\n", sep, d.dir)
-		fmt.Printf("\033[90m%s %q\033[0m\n", rsyncScript, d.dir)
+	}
+
+	// Iteratively collapse siblings to their parent (max 8 passes).
+	// Stop collapsing when the parent has depth ≤ 2 (e.g. /mnt or /mnt/disk)
+	// to avoid coalescing into a filesystem root.
+	isTooShallow := func(p string) bool {
+		clean := filepath.Clean(p)
+		return strings.Count(clean, string(filepath.Separator)) <= 2
+	}
+	for pass := 0; pass < 8; pass++ {
+		parentCount := map[string]int{}
+		for _, it := range items {
+			parent := filepath.Dir(it.path)
+			if !isTooShallow(parent) {
+				parentCount[parent]++
+			}
+		}
+		merged := map[string]*runItem{}
+		var next []runItem
+		changed := false
+		for _, it := range items {
+			parent := filepath.Dir(it.path)
+			if parentCount[parent] > 1 {
+				changed = true
+				if m, ok := merged[parent]; ok {
+					m.indices = append(m.indices, it.indices...)
+				} else {
+					cp := runItem{path: parent, indices: append([]int(nil), it.indices...)}
+					merged[parent] = &cp
+					next = append(next, cp)
+				}
+			} else {
+				next = append(next, it)
+			}
+		}
+		// Rebuild with merged pointers reflected.
+		items = next[:0]
+		seen := map[string]bool{}
+		for _, it := range next {
+			if merged[it.path] != nil {
+				if !seen[it.path] {
+					seen[it.path] = true
+					items = append(items, *merged[it.path])
+				}
+			} else {
+				items = append(items, it)
+			}
+		}
+		if !changed {
+			break
+		}
+	}
+
+	for itemIdx, item := range items {
+		fmt.Printf("\n%s\n\033[1;33m%s\033[0m\n", sep, item.path)
+		if len(item.indices) > 1 {
+			fmt.Printf("\033[90m(%d dirs coalesced to parent)\033[0m\n", len(item.indices))
+		}
+		fmt.Printf("\033[90m%s %q\033[0m\n", rsyncScript, item.path)
 
 		run := always
 		if !always {
@@ -946,7 +1013,7 @@ func tuiRunSelected(dirs []tuiDir, selected []bool, rsyncScript string) map[int]
 				always = true
 				fmt.Println("\033[90mRunning all remaining...\033[0m")
 			case 'q', 'Q', 3:
-				fmt.Printf("Quit. (%d remaining skipped)\n", len(dirs)-i)
+				fmt.Printf("Quit. (%d remaining skipped)\n", len(items)-itemIdx)
 				fmt.Printf("\n%s\nDone. %d skipped.\nPress Enter to return to TUI...", sep, skipped)
 				var b [256]byte
 				os.Stdin.Read(b[:])
@@ -958,8 +1025,10 @@ func tuiRunSelected(dirs []tuiDir, selected []bool, rsyncScript string) map[int]
 		}
 
 		if run {
-			ran[i] = true
-			cmd := exec.Command(rsyncScript, d.dir)
+			for _, idx := range item.indices {
+				ran[idx] = true
+			}
+			cmd := exec.Command(rsyncScript, item.path)
 			cmd.Stdout = os.Stdout
 			cmd.Stderr = os.Stderr
 			if err := cmd.Run(); err != nil {
