@@ -19,7 +19,7 @@
   <circle cx="60" cy="19" r="6" fill="#28c840"/>
   <!-- address bar -->
   <rect x="120" y="8" width="540" height="22" rx="4" fill="#0d1117"/>
-  <text x="390" y="23" text-anchor="middle" fill="#8b949e" font-size="11">file:///home/slm/report.html</text>
+  <text x="390" y="23" text-anchor="middle" fill="#8b949e" font-size="11">file:///home/user/report.html</text>
 
   <!-- page body -->
   <rect x="0" y="38" width="900" height="462" fill="#0f1117" clip-path="url(#card)"/>
@@ -29,41 +29,41 @@
   <text x="32" y="72" fill="#e2e8f0" font-size="18" font-weight="bold">File Sync Report</text>
 
   <!-- meta block -->
-  <text x="32" y="92" fill="#64748b" font-size="11">Source: <tspan fill="#94a3b8">/mnt1/torrent-complete</tspan>  ·  4,821 files  ·  scanned 2026-10-04 09:15</text>
-  <text x="32" y="108" fill="#64748b" font-size="11">Dest: <tspan fill="#94a3b8">/volume2/data, /volume1/home</tspan>  ·  18,203 files  ·  scanned 2026-10-04 08:42</text>
-  <text x="32" y="124" fill="#64748b" font-size="11">Status: <tspan fill="#f87171">1531 missing · 8 size-mismatch · 0 hash-mismatch</tspan></text>
+  <text x="32" y="92" fill="#64748b" font-size="11">Source: <tspan fill="#94a3b8">/mnt/media</tspan>  ·  4,821 files  ·  scanned 2026-10-04 09:15</text>
+  <text x="32" y="108" fill="#64748b" font-size="11">Dest: <tspan fill="#94a3b8">/volume1/data, /volume2/archive</tspan>  ·  18,203 files  ·  scanned 2026-10-04 08:42</text>
+  <text x="32" y="124" fill="#64748b" font-size="11">Status: <tspan fill="#f87171">842 missing · 5 size-mismatch · 0 hash-mismatch</tspan></text>
 
   <!-- divider -->
   <line x1="32" y1="136" x2="868" y2="136" stroke="#2d3148" stroke-width="1"/>
 
   <!-- MISSING FILES section -->
   <text x="32" y="156" class="h2" fill="#64748b">MISSING FILES</text>
-  <text x="163" y="156" fill="#f87171" font-size="11" font-weight="bold">1531</text>
+  <text x="163" y="156" fill="#f87171" font-size="11" font-weight="bold">842</text>
 
   <!-- dir row 1 -->
   <rect x="32" y="164" width="836" height="26" rx="3" fill="#1a1d27"/>
   <text x="46" y="181" fill="#60a5fa">▶</text>
-  <text x="62" y="181" fill="#60a5fa">/mnt1/torrent-complete/Andy Weir - Project Hail Mary/</text>
-  <text x="572" y="181" fill="#64748b">(7 files)</text>
+  <text x="62" y="181" fill="#60a5fa">/mnt/media/Action.Movie.2023.1080p.BluRay.x264/</text>
+  <text x="550" y="181" fill="#64748b">(3 files)</text>
 
   <!-- dir row 2 -->
   <rect x="32" y="194" width="836" height="26" rx="3" fill="#1a1d27"/>
   <text x="46" y="211" fill="#60a5fa">▶</text>
-  <text x="62" y="211" fill="#60a5fa">/mnt1/torrent-complete/James Herriot - All Things Bright and Beautiful.../</text>
-  <text x="734" y="211" fill="#64748b">(52 files)</text>
+  <text x="62" y="211" fill="#60a5fa">/mnt/media/Documentary.Series.S02.720p.HDTV.x265/</text>
+  <text x="558" y="211" fill="#64748b">(14 files)</text>
 
   <!-- dir row 3 -->
   <rect x="32" y="224" width="836" height="26" rx="3" fill="#1a1d27"/>
   <text x="46" y="241" fill="#60a5fa">▶</text>
-  <text x="62" y="241" fill="#60a5fa">/mnt1/torrent-complete/Shaun the Sheep S01-S06 (2007-)/</text>
-  <text x="572" y="241" fill="#64748b">(46 files)</text>
+  <text x="62" y="241" fill="#60a5fa">/mnt/media/SciFi.Series.S03.COMPLETE.1080p.ATVP.WEB/</text>
+  <text x="560" y="241" fill="#64748b">(10 files)</text>
 
   <!-- more dirs -->
-  <text x="46" y="265" fill="#64748b" font-size="11">... 147 more directories</text>
+  <text x="46" y="265" fill="#64748b" font-size="11">... 70 more directories</text>
 
   <!-- RSYNC COMMANDS section -->
   <text x="32" y="292" class="h2" fill="#64748b">RSYNC COMMANDS</text>
-  <text x="196" y="292" fill="#4ade80" font-size="11" font-weight="bold">150 dirs</text>
+  <text x="196" y="292" fill="#4ade80" font-size="11" font-weight="bold">73 dirs</text>
   <text x="32" y="306" fill="#64748b" font-size="10">Run ~/rsync.sh for each missing-file directory:</text>
 
   <!-- code block -->
@@ -72,10 +72,10 @@
   <rect x="792" y="320" width="50" height="20" rx="3" fill="#2d3148"/>
   <text x="817" y="334" text-anchor="middle" fill="#e2e8f0" font-size="10">Copy</text>
   <!-- code lines -->
-  <text x="48" y="337" fill="#64748b"># /mnt1/torrent-complete</text>
-  <text x="48" y="355" fill="#4ade80">~/rsync.sh <tspan fill="#e2e8f0">"/mnt1/torrent-complete/Andy Weir - Project Hail Mary"</tspan></text>
-  <text x="48" y="373" fill="#4ade80">~/rsync.sh <tspan fill="#e2e8f0">"/mnt1/torrent-complete/James Herriot - All Things Bright and Beautiful..."</tspan></text>
-  <text x="48" y="391" fill="#4ade80">~/rsync.sh <tspan fill="#e2e8f0">"/mnt1/torrent-complete/Shaun the Sheep S01-S06 (2007-)..."</tspan></text>
+  <text x="48" y="337" fill="#64748b"># /mnt/media</text>
+  <text x="48" y="355" fill="#4ade80">~/rsync.sh <tspan fill="#e2e8f0">"/mnt/media/Action.Movie.2023.1080p.BluRay.x264"</tspan></text>
+  <text x="48" y="373" fill="#4ade80">~/rsync.sh <tspan fill="#e2e8f0">"/mnt/media/Documentary.Series.S02.720p.HDTV.x265"</tspan></text>
+  <text x="48" y="391" fill="#4ade80">~/rsync.sh <tspan fill="#e2e8f0">"/mnt/media/SciFi.Series.S03.COMPLETE.1080p.ATVP.WEB"</tspan></text>
 
   <!-- summary bar -->
   <line x1="32" y1="414" x2="868" y2="414" stroke="#2d3148" stroke-width="1"/>
@@ -83,12 +83,12 @@
   <!-- stat tiles -->
   <!-- Missing -->
   <g>
-    <text x="130" y="444" text-anchor="middle" fill="#f87171" font-size="28" font-weight="bold">1531</text>
+    <text x="130" y="444" text-anchor="middle" fill="#f87171" font-size="28" font-weight="bold">842</text>
     <text x="130" y="462" text-anchor="middle" fill="#64748b" font-size="10" letter-spacing="0.06em">MISSING</text>
   </g>
   <!-- Size Mismatch -->
   <g>
-    <text x="350" y="444" text-anchor="middle" fill="#fbbf24" font-size="28" font-weight="bold">8</text>
+    <text x="350" y="444" text-anchor="middle" fill="#fbbf24" font-size="28" font-weight="bold">5</text>
     <text x="350" y="462" text-anchor="middle" fill="#64748b" font-size="10" letter-spacing="0.06em">SIZE MISMATCH</text>
   </g>
   <!-- Hash Mismatch -->
