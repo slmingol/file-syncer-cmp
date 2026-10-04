@@ -168,21 +168,38 @@ func cmdScan(args []string) {
 	fs.Parse(flagArgs)
 
 	if len(posArgs) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: scan <path> [flags]")
+		fmt.Fprintln(os.Stderr, "usage: scan <path> [path2 ...] [flags]")
 		os.Exit(1)
 	}
 
-	root := posArgs[0]
 	exts := parseExts(*extList)
 
-	fmt.Fprintf(os.Stderr, "scanning %s ...\n", root)
-	idx, err := scan(root, exts, *doHash, *workers)
-	if err != nil {
-		fatal(err)
+	var indexes []*Index
+	for _, root := range posArgs {
+		fmt.Fprintf(os.Stderr, "scanning %s ...\n", root)
+		idx, err := scan(root, exts, *doHash, *workers)
+		if err != nil {
+			fatal(err)
+		}
+		fmt.Fprintf(os.Stderr, "found %d files\n", len(idx.Files))
+		indexes = append(indexes, idx)
 	}
-	fmt.Fprintf(os.Stderr, "found %d files\n", len(idx.Files))
 
-	data, err := json.MarshalIndent(idx, "", "  ")
+	var combined *Index
+	if len(indexes) == 1 {
+		combined = indexes[0]
+	} else {
+		combined = mergeIndexes(indexes)
+		// For a multi-root scan index, record all roots in Root field.
+		roots := make([]string, len(indexes))
+		for i, idx := range indexes {
+			roots[i] = idx.Root
+		}
+		combined.Root = strings.Join(roots, ", ")
+		fmt.Fprintf(os.Stderr, "merged %d roots, %d files total\n", len(indexes), len(combined.Files))
+	}
+
+	data, err := json.MarshalIndent(combined, "", "  ")
 	if err != nil {
 		fatal(err)
 	}
