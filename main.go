@@ -147,11 +147,24 @@ EXAMPLES:
   file-syncer-cmp scan /mnt/disk1 --output disk1.json --hash
   file-syncer-cmp compare disk1.json nas.json --hash
 
+  # Scan multiple NAS paths into one index:
+  file-syncer-cmp scan /volume2/data /volume1/home --output nas.json
+
   # Custom extensions:
   file-syncer-cmp scan /mnt/disk1 --ext mp3,flac,mkv,mp4
 
   # HTML report:
   file-syncer-cmp compare --dest nas.json disk1.json disk2.json --format html > report.html
+
+  # Fuzzy match (catches renamed/renumbered files on dest):
+  file-syncer-cmp compare --dest nas.json disk1.json --fuzzy
+
+  # Filter junk files from missing list:
+  file-syncer-cmp compare --dest nas.json disk1.json --ignore 'RARBG*,www.*,*.nfo'
+
+  # Interactive TUI to selectively rsync missing dirs:
+  file-syncer-cmp compare --dest nas.json disk1.json --fuzzy --tui
+  file-syncer-cmp compare --dest nas.json disk1.json --fuzzy --tui --rsync-script /path/to/rsync.sh
 `)
 }
 
