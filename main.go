@@ -293,10 +293,10 @@ func cmdScan(args []string) {
 	elapsed := time.Since(t0).Round(time.Millisecond)
 	fmt.Fprintf(os.Stderr, "\033[90m  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\033[0m\n")
 	if len(indexes) > 1 {
-		fmt.Fprintf(os.Stderr, "\033[1;32m✓\033[0m  \033[1m%s files\033[0m across %d roots  \033[90m→ %s\033[0m  \033[1m%s\033[0m\n",
+		fmt.Fprintf(os.Stderr, "\033[1;32m✓\033[0m  \033[1m%s files\033[0m across %d roots  \033[90m→ %s\033[0m  \033[1m%s\033[0m\n\033[90m  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\033[0m\n",
 			total, len(indexes), dest, elapsed)
 	} else {
-		fmt.Fprintf(os.Stderr, "\033[1;32m✓\033[0m  \033[1m%s files\033[0m  \033[90m→ %s\033[0m  \033[1m%s\033[0m\n",
+		fmt.Fprintf(os.Stderr, "\033[1;32m✓\033[0m  \033[1m%s files\033[0m  \033[90m→ %s\033[0m  \033[1m%s\033[0m\n\033[90m  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\033[0m\n",
 			total, dest, elapsed)
 	}
 }
