@@ -244,7 +244,7 @@ func cmdScan(args []string) {
 		if err != nil {
 			fatal(err)
 		}
-		fmt.Fprintf(os.Stderr, "found %d files in %s\n", len(idx.Files), time.Since(rt).Round(time.Millisecond))
+		fmt.Fprintf(os.Stderr, "  \033[90m→\033[0m \033[1m%d files\033[0m  \033[90m%s\033[0m\n", len(idx.Files), time.Since(rt).Round(time.Millisecond))
 		indexes = append(indexes, idx)
 	}
 
@@ -259,8 +259,7 @@ func cmdScan(args []string) {
 			roots[i] = idx.Root
 		}
 		combined.Root = strings.Join(roots, ", ")
-		fmt.Fprintf(os.Stderr, "merged %d roots, %d files total\n", len(indexes), len(combined.Files))
-
+		fmt.Fprintf(os.Stderr, "  \033[90m→\033[0m merged %d roots, \033[1m%d files total\033[0m\n", len(indexes), len(combined.Files))
 	}
 
 	data, err := json.MarshalIndent(combined, "", "  ")
@@ -275,9 +274,9 @@ func cmdScan(args []string) {
 		if err := os.WriteFile(*output, data, 0644); err != nil {
 			fatal(err)
 		}
-		fmt.Fprintf(os.Stderr, "wrote %s\n", *output)
+		fmt.Fprintf(os.Stderr, "  \033[90m→\033[0m wrote %s\n", *output)
 	}
-	fmt.Fprintf(os.Stderr, "scan done in %s\n", time.Since(t0).Round(time.Millisecond))
+	fmt.Fprintf(os.Stderr, "\033[1;32m✓ scan done\033[0m  \033[1m%s\033[0m\n", time.Since(t0).Round(time.Millisecond))
 }
 
 // ---------- compare ----------
@@ -321,7 +320,7 @@ func cmdCompare(args []string) {
 	ct := time.Now()
 	result := compare(src, dst, *doHash, *doFuzzy)
 	filterIgnored(result, *ignoreFlag)
-	fmt.Fprintf(os.Stderr, "compare done in %s — %d missing, %d fuzzy, %d size-mismatch\n",
+	fmt.Fprintf(os.Stderr, "\033[1;32m✓ compare done\033[0m  \033[1m%s\033[0m  \033[31m%d missing\033[0m  \033[33m%d fuzzy\033[0m  \033[90m%d size-mismatch\033[0m\n",
 		time.Since(ct).Round(time.Millisecond),
 		len(result.Missing), len(result.FuzzyMatch), len(result.SizeMismatch))
 	if *doTUI {
@@ -379,7 +378,7 @@ func cmdSyncCheck(args []string) {
 		if err != nil {
 			fatal(err)
 		}
-		fmt.Fprintf(os.Stderr, "found %d files in %s\n", len(idx.Files), time.Since(rt).Round(time.Millisecond))
+		fmt.Fprintf(os.Stderr, "  \033[90m→\033[0m \033[1m%d files\033[0m  \033[90m%s\033[0m\n", len(idx.Files), time.Since(rt).Round(time.Millisecond))
 		srcIndexes = append(srcIndexes, idx)
 	}
 
@@ -389,14 +388,14 @@ func cmdSyncCheck(args []string) {
 	if err != nil {
 		fatal(err)
 	}
-	fmt.Fprintf(os.Stderr, "found %d files in dest in %s\n", len(dst.Files), time.Since(dt).Round(time.Millisecond))
-	fmt.Fprintf(os.Stderr, "scan done in %s\n", time.Since(sc0).Round(time.Millisecond))
+	fmt.Fprintf(os.Stderr, "  \033[90m→\033[0m \033[1m%d files\033[0m  \033[90m%s\033[0m\n", len(dst.Files), time.Since(dt).Round(time.Millisecond))
+	fmt.Fprintf(os.Stderr, "\033[1;32m✓ scan done\033[0m  \033[1m%s\033[0m\n", time.Since(sc0).Round(time.Millisecond))
 
 	src := mergeIndexes(srcIndexes)
 	ct := time.Now()
 	result := compare(src, dst, *doHash, *doFuzzy)
 	filterIgnored(result, *ignoreFlag)
-	fmt.Fprintf(os.Stderr, "compare done in %s — %d missing, %d fuzzy, %d size-mismatch\n",
+	fmt.Fprintf(os.Stderr, "\033[1;32m✓ compare done\033[0m  \033[1m%s\033[0m  \033[31m%d missing\033[0m  \033[33m%d fuzzy\033[0m  \033[90m%d size-mismatch\033[0m\n",
 		time.Since(ct).Round(time.Millisecond),
 		len(result.Missing), len(result.FuzzyMatch), len(result.SizeMismatch))
 	if *doTUI {
