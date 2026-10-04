@@ -1120,15 +1120,19 @@ func runRsyncHUD(items []runItem, rsyncScript, rsyncSrcRoot string, inputCh <-ch
 			}
 			evCh <- rsyncEv{setDirIdx: i, setDir: item.path}
 			srcArg := item.path
+			var cmdDir string
 			if rsyncSrcRoot != "" {
 				root := filepath.Clean(rsyncSrcRoot)
-				rel := strings.TrimPrefix(filepath.Clean(item.path), root)
+				rel := strings.TrimPrefix(filepath.Clean(item.path), root+string(filepath.Separator))
 				if rel != filepath.Clean(item.path) {
-					// Insert ./ anchor so rsync --relative preserves subpath.
-					srcArg = root + "/." + rel
+					// Run script from source root with relative path so rsync
+					// --relative in rsync.sh preserves the full subdir structure.
+					srcArg = rel
+					cmdDir = root
 				}
 			}
 			cmd := exec.CommandContext(ctx, rsyncScript, srcArg)
+			cmd.Dir = cmdDir
 			pr, pw := io.Pipe()
 			cmd.Stdout = pw
 			cmd.Stderr = io.Discard
