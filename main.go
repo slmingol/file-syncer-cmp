@@ -724,9 +724,30 @@ func buildTUIDirs(missing []FileRecord) []tuiDir {
 		}
 		counts[k]++
 	}
-	dirs := make([]tuiDir, len(order))
+	raw := make([]tuiDir, len(order))
 	for i, k := range order {
-		dirs[i] = tuiDir{disk: k.disk, dir: k.dir, count: counts[k]}
+		raw[i] = tuiDir{disk: k.disk, dir: k.dir, count: counts[k]}
+	}
+
+	// Drop any entry whose path is a strict parent of another entry.
+	// These are scan roots with loose files directly inside — not useful
+	// as rsync targets when subdirectories are also listed.
+	dirSet := make(map[string]bool, len(raw))
+	for _, d := range raw {
+		dirSet[d.dir] = true
+	}
+	var dirs []tuiDir
+	for _, d := range raw {
+		isParent := false
+		for other := range dirSet {
+			if other != d.dir && strings.HasPrefix(other, d.dir+string(filepath.Separator)) {
+				isParent = true
+				break
+			}
+		}
+		if !isParent {
+			dirs = append(dirs, d)
+		}
 	}
 	return dirs
 }
