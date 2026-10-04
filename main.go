@@ -227,7 +227,7 @@ func cmdScan(args []string) {
 			var old Index
 			if json.Unmarshal(data, &old) == nil {
 				baseIndex = &old
-				fmt.Fprintf(os.Stderr, "\033[1;36mincremental\033[0m  \033[90m%s · %s files · scanned %s\033[0m\n",
+				fmt.Fprintf(os.Stderr, "\033[90m┄┄┄ \033[1;36mincremental\033[0m\033[90m  %s · %s files · scanned %s\033[0m\n",
 					*output, fmtCount(len(old.Files)), old.ScannedAt.Format("2006-01-02 15:04"))
 			}
 		}
@@ -291,7 +291,7 @@ func cmdScan(args []string) {
 
 	total := fmtCount(len(combined.Files))
 	elapsed := time.Since(t0).Round(time.Millisecond)
-	fmt.Fprintln(os.Stderr)
+	fmt.Fprintf(os.Stderr, "\033[90m  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\033[0m\n")
 	if len(indexes) > 1 {
 		fmt.Fprintf(os.Stderr, "\033[1;32m✓\033[0m  \033[1m%s files\033[0m across %d roots  \033[90m→ %s\033[0m  \033[1m%s\033[0m\n",
 			total, len(indexes), dest, elapsed)
