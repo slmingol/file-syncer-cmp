@@ -66,6 +66,16 @@ scp nas:/home/slm/nas.json ~/
   --tui
 ```
 
+The TUI invokes `rsync.sh` from the scan root with a **relative path** as `$1` (e.g. `DAY6/Solo/Wonpil/[Album]`). Your script must use `rsync --relative` to preserve the full directory structure at the destination:
+
+```bash
+#!/usr/bin/env bash
+# ~/rsync.sh — called from source root with relative subpath as $1
+rsync -av --relative "$1" slm@nas-host:~/movies/incoming/
+```
+
+Without `--relative`, rsync copies only the final path component (`[Album]`) directly into the destination, losing the ancestor structure.
+
 On subsequent runs, skip unchanged dirs with `--incremental`:
 
 ```bash
@@ -200,7 +210,7 @@ Default extensions: `mp3 flac wav aac ogg opus m4a wma alac aiff mkv mp4 avi mov
 | `--ignore` | — | Comma-separated filename globs to drop from missing, e.g. `RARBG*,www.*` |
 | `--tui` | off | Launch interactive TUI instead of printing report |
 | `--rsync-script` | `~/rsync.sh` | Script called with each selected directory path |
-| `--rsync-src-root` | — | Source root directory. When set, `--rsync-script` is invoked from this directory with the relative subpath (e.g. `DAY6/Solo/Wonpil/[Album]`) instead of the full absolute path. Use when your rsync.sh expects to run from the torrent root and uses `rsync --relative` to preserve directory structure at the destination. |
+| `--rsync-src-root` | — | Override the source root used when invoking `--rsync-script`. Normally auto-detected from the scan index. |
 
 ### `sync-check`
 
