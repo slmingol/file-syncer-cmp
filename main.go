@@ -227,7 +227,7 @@ func cmdScan(args []string) {
 			var old Index
 			if json.Unmarshal(data, &old) == nil {
 				baseIndex = &old
-				fmt.Fprintf(os.Stderr, "\033[1mincremental\033[0m  %s  \033[90m%s files · scanned %s\033[0m\n",
+				fmt.Fprintf(os.Stderr, "\033[1;36mincremental\033[0m  \033[90m%s · %s files · scanned %s\033[0m\n",
 					*output, fmtCount(len(old.Files)), old.ScannedAt.Format("2006-01-02 15:04"))
 			}
 		}
