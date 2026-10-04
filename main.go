@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -1104,16 +1105,19 @@ func runRsyncHUD(items []runItem, rsyncScript string, inputCh <-chan []byte) map
 	evCh := make(chan rsyncEv, 64)
 	abortCh := make(chan struct{}, 1)
 
+	ctx, cancelCtx := context.WithCancel(context.Background())
 	go func() {
 		defer close(evCh)
+		defer cancelCtx()
 		for i, item := range items {
 			select {
 			case <-abortCh:
+				cancelCtx()
 				return
 			default:
 			}
 			evCh <- rsyncEv{setDirIdx: i, setDir: item.path}
-			cmd := exec.Command(rsyncScript, item.path)
+			cmd := exec.CommandContext(ctx, rsyncScript, item.path)
 			pr, pw := io.Pipe()
 			cmd.Stdout = pw
 			cmd.Stderr = io.Discard
