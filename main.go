@@ -985,29 +985,27 @@ func runTUI(result *CompareResult, rsyncScript string, noSelect string) {
 			}
 			// Run rsync with in-TUI HUD (stays in raw mode).
 			ran := runRsyncHUD(items, rsyncScript, inputCh)
-			// Remove synced dirs and redraw list.
-			if len(ran) > 0 {
-				var remaining []tuiDir
-				for i, d := range dirs {
-					if !ran[i] {
-						remaining = append(remaining, d)
-					}
+			// Remove synced dirs; always reset selection after any HUD run.
+			var remaining []tuiDir
+			for i, d := range dirs {
+				if !ran[i] {
+					remaining = append(remaining, d)
 				}
-				dirs = remaining
-				selected = make([]bool, len(dirs))
-				if cursor >= len(dirs) {
-					cursor = len(dirs) - 1
-				}
-				if cursor < 0 {
-					cursor = 0
-				}
-				viewTop = 0
-				if len(dirs) == 0 {
-					restore()
-					fmt.Print("\033[H\033[2J")
-					fmt.Println("All selected dirs synced.")
-					return
-				}
+			}
+			dirs = remaining
+			selected = make([]bool, len(dirs))
+			if cursor >= len(dirs) {
+				cursor = len(dirs) - 1
+			}
+			if cursor < 0 {
+				cursor = 0
+			}
+			viewTop = 0
+			if len(dirs) == 0 {
+				restore()
+				fmt.Print("\033[H\033[2J")
+				fmt.Println("All selected dirs synced.")
+				return
 			}
 		}
 	}
