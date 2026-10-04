@@ -69,7 +69,22 @@ scp nas:/home/slm/nas.json ~/
 On subsequent runs, skip unchanged dirs with `--incremental`:
 
 ```bash
-./file-syncer-cmp-linux-arm64 scan /mnt1/torrent-complete --output mnt1.json --incremental
+./file-syncer-cmp-linux-arm64 scan /volume2/data /volume1/home --output nas.json --incremental
+```
+
+Scan output shows per-root timing and a summary:
+
+```
+  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+  incremental  /home/slm/nas.json · 315,522 files · scanned 2026-10-04 11:03
+  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+
+  /volume2/data                               315,338 files  19.0s
+  /volume1/home                                   185 files  34ms
+
+  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+✓  315,523 files across 2 roots  → /home/slm/nas.json  20.5s
+  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
 ```
 
 ---
@@ -132,6 +147,7 @@ Fuzzy match sub-reasons:
 |---|---|
 | `substring` | Dest has `S01E01__Show Name.mkv`, source has `Show Name.mkv` |
 | `episode-renumbered` | Source `S01E02 Title.mkv` matched to dest `S01E03 Title.mkv` (dual-episode shifted numbering) |
+| `episode-reencoded` | Source `Show.S04E01.720p.HEVC.x265-Group.mkv` matched to dest `Show.S04E01.720p.ATVP.WEB.mp4` (same episode, different encode) |
 
 ---
 
