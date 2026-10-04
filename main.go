@@ -847,8 +847,24 @@ func runTUI(result *CompareResult, rsyncScript string, noSelect string) {
 	restore := func() { term.Restore(fd, oldState) }
 	defer restore()
 
+	// Shared stdin channel for TUI list and rsync HUD.
+	inputCh := make(chan []byte, 4)
+	go func() {
+		buf := make([]byte, 8)
+		for {
+			n, err := os.Stdin.Read(buf)
+			if n > 0 {
+				c := make([]byte, n)
+				copy(c, buf[:n])
+				inputCh <- c
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+
 	out := os.Stdout
-	buf := make([]byte, 4)
 
 	draw := func() {
 		termW, termH, _ := term.GetSize(int(out.Fd()))
@@ -923,11 +939,12 @@ func runTUI(result *CompareResult, rsyncScript string, noSelect string) {
 
 	for {
 		draw()
-		n, _ := os.Stdin.Read(buf)
-		if n == 0 {
+		input := <-inputCh
+		if len(input) == 0 {
 			continue
 		}
-		b := buf[0]
+		b := input[0]
+		n := len(input)
 		switch {
 		case b == 'q' || b == 'Q' || b == 3: // q / Ctrl-C
 			restore()
@@ -947,8 +964,8 @@ func runTUI(result *CompareResult, rsyncScript string, noSelect string) {
 			for i := range selected {
 				selected[i] = false
 			}
-		case b == 0x1b && n >= 3 && buf[1] == '[':
-			switch buf[2] {
+		case b == 0x1b && n >= 3 && input[1] == '[':
+			switch input[2] {
 			case 'A': // up
 				if cursor > 0 {
 					cursor--
@@ -959,10 +976,13 @@ func runTUI(result *CompareResult, rsyncScript string, noSelect string) {
 				}
 			}
 		case b == '\r' || b == '\n':
-			restore()
-			fmt.Print("\033[H\033[2J")
-			ran := tuiRunSelected(dirs, selected, rsyncScript)
-			// Remove synced dirs and re-enter TUI with remainder.
+			items := buildRsyncItems(dirs, selected)
+			if len(items) == 0 {
+				break
+			}
+			// Run rsync with in-TUI HUD (stays in raw mode).
+			ran := runRsyncHUD(items, rsyncScript, inputCh)
+			// Remove synced dirs and redraw list.
 			if len(ran) > 0 {
 				var remaining []tuiDir
 				for i, d := range dirs {
@@ -980,92 +1000,60 @@ func runTUI(result *CompareResult, rsyncScript string, noSelect string) {
 				}
 				viewTop = 0
 				if len(dirs) == 0 {
+					restore()
+					fmt.Print("\033[H\033[2J")
 					fmt.Println("All selected dirs synced.")
 					return
 				}
-				oldState2, err2 := term.MakeRaw(fd)
-				if err2 != nil {
-					return
-				}
-				oldState = oldState2
-				restore = func() { term.Restore(fd, oldState) }
-				continue
 			}
-			return
 		}
 	}
 }
 
-// tuiRunSelected runs rsync for each selected dir, prompting per-dir unless
-// "always" mode is active. Returns a map[original index]bool of dirs that were
-// actually run (so the caller can remove them from the list).
-func tuiRunSelected(dirs []tuiDir, selected []bool, rsyncScript string) map[int]bool {
-	any := false
-	for _, s := range selected {
-		if s {
-			any = true
-			break
-		}
-	}
-	if !any {
-		fmt.Println("Nothing selected.")
-		return nil
-	}
-	sep := strings.Repeat("─", 60)
-	skipped := 0
-	always := false
-	ran := map[int]bool{}
+// runItem is one rsync invocation: a path + the original dir indices it covers.
+type runItem struct {
+	path    string
+	indices []int
+}
 
-	// Coalesce siblings: if >1 selected dirs share the same parent, rsync the
-	// parent once instead of each child separately. Repeat until stable so
-	// deeply nested groups (e.g. artist/album/*) collapse all the way up.
-	type runItem struct {
-		path    string // path passed to rsync script
-		indices []int  // original dir indices this item covers
-	}
-
-	// Seed with one item per selected dir.
+// buildRsyncItems coalesces selected dirs into rsync invocations.
+// Siblings that share a parent are merged to sync the parent once.
+func buildRsyncItems(dirs []tuiDir, selected []bool) []runItem {
 	var items []runItem
 	for i, d := range dirs {
 		if selected[i] {
 			items = append(items, runItem{path: d.dir, indices: []int{i}})
 		}
 	}
-
-	// Iteratively collapse siblings to their parent (max 8 passes).
-	// Stop collapsing when the parent has depth ≤ 2 (e.g. /mnt or /mnt/disk)
-	// to avoid coalescing into a filesystem root.
 	isTooShallow := func(p string) bool {
-		clean := filepath.Clean(p)
-		return strings.Count(clean, string(filepath.Separator)) <= 2
+		return strings.Count(filepath.Clean(p), string(filepath.Separator)) <= 2
 	}
 	for pass := 0; pass < 8; pass++ {
 		parentCount := map[string]int{}
 		for _, it := range items {
-			parent := filepath.Dir(it.path)
-			if !isTooShallow(parent) {
-				parentCount[parent]++
+			p := filepath.Dir(it.path)
+			if !isTooShallow(p) {
+				parentCount[p]++
 			}
 		}
 		merged := map[string]*runItem{}
 		var next []runItem
 		changed := false
 		for _, it := range items {
-			parent := filepath.Dir(it.path)
-			if parentCount[parent] > 1 {
+			p := filepath.Dir(it.path)
+			if parentCount[p] > 1 {
 				changed = true
-				if m, ok := merged[parent]; ok {
+				if m, ok := merged[p]; ok {
 					m.indices = append(m.indices, it.indices...)
 				} else {
-					cp := runItem{path: parent, indices: append([]int(nil), it.indices...)}
-					merged[parent] = &cp
+					cp := runItem{path: p, indices: append([]int(nil), it.indices...)}
+					merged[p] = &cp
 					next = append(next, cp)
 				}
 			} else {
 				next = append(next, it)
 			}
 		}
-		// Rebuild with merged pointers reflected.
 		items = next[:0]
 		seen := map[string]bool{}
 		for _, it := range next {
@@ -1082,78 +1070,190 @@ func tuiRunSelected(dirs []tuiDir, selected []bool, rsyncScript string) map[int]
 			break
 		}
 	}
+	return items
+}
 
-	for itemIdx, item := range items {
-		fmt.Printf("\n%s\n\033[1;33m%s\033[0m\n", sep, item.path)
-		if len(item.indices) > 1 {
-			fmt.Printf("\033[90m(%d dirs coalesced to parent)\033[0m\n", len(item.indices))
-		}
-		fmt.Printf("\033[90m%s %q\033[0m\n", rsyncScript, item.path)
+// runRsyncHUD runs rsync for each item and draws a live TUI progress screen.
+// inputCh is the shared raw-stdin channel from runTUI (stays in raw mode).
+// Returns the set of original dir indices that were synced.
+func runRsyncHUD(items []runItem, rsyncScript string, inputCh <-chan []byte) map[int]bool {
+	ran := map[int]bool{}
+	if len(items) == 0 {
+		return ran
+	}
 
-		run := always
-		if !always {
-			fmt.Printf("Run? [y/a/N/q] ")
-			var resp [1]byte
-			os.Stdin.Read(resp[:])
-			// Drain the rest of the line (\n left after single-key read).
-			var drain [256]byte
-			for {
-				n, _ := os.Stdin.Read(drain[:])
-				done := false
-				for _, b := range drain[:n] {
-					if b == '\n' || b == '\r' {
-						done = true
-					}
-				}
-				if done || n == 0 {
-					break
-				}
-			}
-			fmt.Println()
-			switch resp[0] {
-			case 'y', 'Y':
-				run = true
-			case 'a', 'A':
-				run = true
-				always = true
-				fmt.Println("\033[90mRunning all remaining...\033[0m")
-			case 'q', 'Q', 3:
-				fmt.Printf("Quit. (%d remaining skipped)\n", len(items)-itemIdx)
-				fmt.Printf("\n%s\nDone. %d skipped.\nPress Enter to return to TUI...", sep, skipped)
-				var b [256]byte
-				os.Stdin.Read(b[:])
-				return ran
+	type hudState struct {
+		dirIdx    int
+		dirTotal  int
+		dirPath   string
+		completed []string
+		inFlight  string
+		allDone   bool
+		aborted   bool
+	}
+	var mu sync.Mutex
+	hs := hudState{dirTotal: len(items), dirIdx: -1}
+
+	type rsyncEv struct {
+		setDirIdx int
+		setDir    string
+		fileOK    string
+		inFlight  string
+	}
+	evCh := make(chan rsyncEv, 64)
+	abortCh := make(chan struct{}, 1)
+
+	go func() {
+		defer close(evCh)
+		for i, item := range items {
+			select {
+			case <-abortCh:
+				return
 			default:
-				skipped++
-				fmt.Println("\033[90mSkipped.\033[0m")
 			}
-		}
-
-		if run {
-			for _, idx := range item.indices {
-				ran[idx] = true
-			}
+			evCh <- rsyncEv{setDirIdx: i, setDir: item.path}
 			cmd := exec.Command(rsyncScript, item.path)
 			pr, pw := io.Pipe()
 			cmd.Stdout = pw
-			cmd.Stderr = os.Stderr
-			var hudWg sync.WaitGroup
-			hudWg.Add(1)
+			cmd.Stderr = io.Discard
+			var wg sync.WaitGroup
+			wg.Add(1)
 			go func() {
-				defer hudWg.Done()
-				rsyncHUD(pr)
+				defer wg.Done()
+				defer pr.Close()
+				sc := bufio.NewScanner(pr)
+				var pending string
+				for sc.Scan() {
+					line := strings.TrimSpace(sc.Text())
+					if line == "" ||
+						strings.HasPrefix(line, "sending ") ||
+						strings.HasPrefix(line, "sent ") ||
+						strings.HasPrefix(line, "total size") ||
+						strings.HasPrefix(line, "created directory") ||
+						strings.HasSuffix(line, "/") {
+						continue
+					}
+					if m := reRsyncStats.FindStringSubmatch(line); m != nil {
+						n, _ := strconv.Atoi(m[3])
+						total, _ := strconv.Atoi(m[5])
+						name := filepath.Base(pending)
+						evCh <- rsyncEv{fileOK: fmt.Sprintf("%-52s \033[90m[%d/%d]  %s\033[0m",
+							truncateName(name, 52), n, total, m[1])}
+						pending = ""
+					} else {
+						pending = line
+						evCh <- rsyncEv{inFlight: truncateName(filepath.Base(line), 60)}
+					}
+				}
 			}()
-			if err := cmd.Run(); err != nil {
-				fmt.Fprintf(os.Stderr, "\033[31mrsync failed:\033[0m %v\n", err)
-			}
+			cmd.Run()
 			pw.Close()
-			hudWg.Wait()
+			wg.Wait()
+			for _, idx := range item.indices {
+				ran[idx] = true
+			}
+		}
+	}()
+
+	draw := func() {
+		mu.Lock()
+		h := hs
+		mu.Unlock()
+		termW, termH, _ := term.GetSize(int(os.Stdout.Fd()))
+		if termW < 40 {
+			termW = 80
+		}
+		if termH < 8 {
+			termH = 24
+		}
+		rule := strings.Repeat("┄", termW-4)
+		fmt.Fprint(os.Stdout, "\033[H\033[2J")
+		fmt.Fprintf(os.Stdout, "\033[90m  %s\033[0m\r\n", rule)
+		statusLabel := "\033[1;36mrsyncing\033[0m"
+		if h.allDone {
+			statusLabel = "\033[1;32mdone\033[0m"
+		} else if h.aborted {
+			statusLabel = "\033[1;31maborted\033[0m"
+		}
+		dirLabel := ""
+		if h.dirIdx >= 0 {
+			dirLabel = fmt.Sprintf("  \033[90m[%d/%d]\033[0m", h.dirIdx+1, h.dirTotal)
+		}
+		fmt.Fprintf(os.Stdout, "  %s%s  \033[90m%s\033[0m\r\n",
+			statusLabel, dirLabel, truncateName(h.dirPath, termW-30))
+		fmt.Fprintf(os.Stdout, "\033[90m  %s\033[0m\r\n\r\n", rule)
+		maxFiles := termH - 10
+		if maxFiles < 1 {
+			maxFiles = 1
+		}
+		completed := h.completed
+		if len(completed) > maxFiles {
+			completed = completed[len(completed)-maxFiles:]
+		}
+		for _, f := range completed {
+			fmt.Fprintf(os.Stdout, "  \033[32m✓\033[0m %s\r\n", f)
+		}
+		if h.inFlight != "" {
+			fmt.Fprintf(os.Stdout, "  \033[33m→\033[0m %s\r\n", h.inFlight)
+		}
+		fmt.Fprintf(os.Stdout, "\r\n")
+		if h.allDone || h.aborted {
+			fmt.Fprintf(os.Stdout, "\033[90m  press any key to return\033[0m\r\n")
+		} else {
+			fmt.Fprintf(os.Stdout, "\033[90m  q abort\033[0m\r\n")
 		}
 	}
-	fmt.Printf("\n%s\nDone. %d skipped.\nPress Enter to return to TUI...", sep, skipped)
-	var b [256]byte
-	os.Stdin.Read(b[:])
-	return ran
+
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case ev, ok := <-evCh:
+			if !ok {
+				mu.Lock()
+				hs.allDone = true
+				mu.Unlock()
+				evCh = nil
+				draw()
+				continue
+			}
+			mu.Lock()
+			if ev.setDir != "" {
+				hs.dirIdx = ev.setDirIdx
+				hs.dirPath = ev.setDir
+				hs.inFlight = ""
+			}
+			if ev.fileOK != "" {
+				hs.completed = append(hs.completed, ev.fileOK)
+				hs.inFlight = ""
+			}
+			if ev.inFlight != "" {
+				hs.inFlight = ev.inFlight
+			}
+			mu.Unlock()
+			draw()
+		case input := <-inputCh:
+			mu.Lock()
+			done := hs.allDone
+			aborted := hs.aborted
+			mu.Unlock()
+			if done {
+				return ran
+			}
+			if !aborted && len(input) > 0 && (input[0] == 'q' || input[0] == 'Q' || input[0] == 3) {
+				mu.Lock()
+				hs.aborted = true
+				mu.Unlock()
+				select {
+				case abortCh <- struct{}{}:
+				default:
+				}
+				draw()
+			}
+		case <-ticker.C:
+			draw()
+		}
+	}
 }
 
 // filterIgnored removes entries from result.Missing whose filename matches any
@@ -1183,57 +1283,6 @@ func filterIgnored(result *CompareResult, ignore string) {
 		}
 	}
 	result.Missing = keep
-}
-
-// rsyncHUD reads rsync stdout, suppresses raw scroll, and shows a compact live display:
-// completed files print with ✓, the in-flight file updates in place with →.
-func rsyncHUD(r io.Reader) {
-	sc := bufio.NewScanner(r)
-	var pendingFile string
-	inFlight := false
-
-	flush := func() {
-		if inFlight {
-			fmt.Println()
-			inFlight = false
-		}
-	}
-
-	for sc.Scan() {
-		line := sc.Text()
-		stripped := strings.TrimSpace(line)
-		if stripped == "" {
-			continue
-		}
-		// Skip rsync preamble / summary lines.
-		if strings.HasPrefix(stripped, "sending ") ||
-			strings.HasPrefix(stripped, "sent ") ||
-			strings.HasPrefix(stripped, "total size") ||
-			strings.HasPrefix(stripped, "created directory") ||
-			strings.HasSuffix(stripped, "/") {
-			continue
-		}
-		// Stats line: bytes% speed eta (xfr#N, to-chk=M/T)
-		if m := reRsyncStats.FindStringSubmatch(stripped); m != nil {
-			speed := m[1]
-			n, _ := strconv.Atoi(m[3])
-			remaining, _ := strconv.Atoi(m[4])
-			total, _ := strconv.Atoi(m[5])
-			done := total - remaining
-			name := filepath.Base(pendingFile)
-			fmt.Printf("\r  \033[32m✓\033[0m %-55s \033[90m[%d/%d]  %s\033[0m\n",
-				truncateName(name, 55), n, done+1, speed)
-			inFlight = false
-			pendingFile = ""
-			continue
-		}
-		// Filename line.
-		pendingFile = stripped
-		name := filepath.Base(stripped)
-		fmt.Printf("\r  \033[33m→\033[0m %-55s", truncateName(name, 55))
-		inFlight = true
-	}
-	flush()
 }
 
 // rsyncCommands builds deduplicated ~/rsync.sh commands for missing files,
