@@ -818,6 +818,7 @@ func tuiRunSelected(dirs []tuiDir, selected []bool, rsyncScript string) {
 	}
 	sep := strings.Repeat("─", 60)
 	skipped := 0
+	always := false
 
 	for i, d := range dirs {
 		if !selected[i] {
@@ -825,14 +826,30 @@ func tuiRunSelected(dirs []tuiDir, selected []bool, rsyncScript string) {
 		}
 		fmt.Printf("\n%s\n\033[1;33m%s\033[0m\n", sep, d.dir)
 		fmt.Printf("\033[90m%s %q\033[0m\n", rsyncScript, d.dir)
-		fmt.Printf("Run? [y/N/q] ")
 
-		var resp [1]byte
-		os.Stdin.Read(resp[:])
-		fmt.Println()
+		run := always
+		if !always {
+			fmt.Printf("Run? [y/a/N/q] ")
+			var resp [1]byte
+			os.Stdin.Read(resp[:])
+			fmt.Println()
+			switch resp[0] {
+			case 'y', 'Y':
+				run = true
+			case 'a', 'A':
+				run = true
+				always = true
+				fmt.Println("\033[90mRunning all remaining...\033[0m")
+			case 'q', 'Q', 3:
+				fmt.Printf("Quit. (%d remaining skipped)\n", len(dirs)-i)
+				return
+			default:
+				skipped++
+				fmt.Println("\033[90mSkipped.\033[0m")
+			}
+		}
 
-		switch resp[0] {
-		case 'y', 'Y':
+		if run {
 			cmd := exec.Command(rsyncScript, d.dir)
 			cmd.Stdout = os.Stdout
 			cmd.Stderr = os.Stderr
@@ -840,12 +857,6 @@ func tuiRunSelected(dirs []tuiDir, selected []bool, rsyncScript string) {
 			if err := cmd.Run(); err != nil {
 				fmt.Fprintf(os.Stderr, "\033[31mrsync failed:\033[0m %v\n", err)
 			}
-		case 'q', 'Q', 3:
-			fmt.Printf("Quit. (%d remaining skipped)\n", len(dirs)-i)
-			return
-		default:
-			skipped++
-			fmt.Println("\033[90mSkipped.\033[0m")
 		}
 	}
 	fmt.Printf("\n%s\nDone. %d skipped.\n", sep, skipped)
