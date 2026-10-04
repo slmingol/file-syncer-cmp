@@ -1210,7 +1210,7 @@ func runRsyncHUD(items []runItem, rsyncScript, rsyncSrcRoot string, inputCh <-ch
 			statusLabel, dirLabel, truncateName(h.dirPath, termW-30))
 		fmt.Fprintf(os.Stdout, "\033[90m  %s\033[0m\033[K\r\n\033[K\r\n", rule)
 
-		// ── file progress (top half) ──
+		// ── file progress (bottom-aligned so in-flight always sits above separator) ──
 		// Reserve: 4 header rows + 1 blank + 1 separator + N queue rows + 1 blank + 1 hint
 		queueRows := len(items)
 		if queueRows > 6 {
@@ -1221,7 +1221,7 @@ func runRsyncHUD(items []runItem, rsyncScript, rsyncSrcRoot string, inputCh <-ch
 		if fileRows < 2 {
 			fileRows = 2
 		}
-		// Show last (fileRows-1) completed + in-flight on last row.
+		// Show last showCompleted completed + in-flight, bottom-aligned.
 		completed := h.completed
 		showCompleted := fileRows - 1
 		if h.inFlight == "" {
@@ -1229,6 +1229,14 @@ func runRsyncHUD(items []runItem, rsyncScript, rsyncSrcRoot string, inputCh <-ch
 		}
 		if len(completed) > showCompleted {
 			completed = completed[len(completed)-showCompleted:]
+		}
+		// Pad blank rows above so content sticks to bottom of file zone.
+		usedRows := len(completed)
+		if h.inFlight != "" {
+			usedRows++
+		}
+		for i := 0; i < fileRows-usedRows; i++ {
+			fmt.Fprintf(os.Stdout, "\033[K\r\n")
 		}
 		for _, f := range completed {
 			fmt.Fprintf(os.Stdout, "  \033[32m✓\033[0m %s\033[K\r\n", f)
