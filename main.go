@@ -798,13 +798,45 @@ func runTUI(result *CompareResult, rsyncScript string) {
 		case b == '\r' || b == '\n':
 			restore()
 			fmt.Print("\033[H\033[2J")
-			tuiRunSelected(dirs, selected, rsyncScript)
+			ran := tuiRunSelected(dirs, selected, rsyncScript)
+			// Remove synced dirs and re-enter TUI with remainder.
+			if len(ran) > 0 {
+				var remaining []tuiDir
+				for i, d := range dirs {
+					if !ran[i] {
+						remaining = append(remaining, d)
+					}
+				}
+				dirs = remaining
+				selected = make([]bool, len(dirs))
+				if cursor >= len(dirs) {
+					cursor = len(dirs) - 1
+				}
+				if cursor < 0 {
+					cursor = 0
+				}
+				viewTop = 0
+				if len(dirs) == 0 {
+					fmt.Println("All selected dirs synced.")
+					return
+				}
+				oldState2, err2 := term.MakeRaw(fd)
+				if err2 != nil {
+					return
+				}
+				oldState = oldState2
+				restore = func() { term.Restore(fd, oldState) }
+				continue
+			}
 			return
 		}
 	}
 }
 
-func tuiRunSelected(dirs []tuiDir, selected []bool, rsyncScript string) {
+// tuiRunSelected runs rsync for each selected dir, prompting per-dir unless
+// "always" mode is active. Returns a map[original index]bool of dirs that were
+// actually run (so the caller can remove them from the list).
+func tuiRunSelected(dirs []tuiDir, selected []bool, rsyncScript string) map[int]bool {
 	any := false
 	for _, s := range selected {
 		if s {
@@ -814,11 +846,12 @@ func tuiRunSelected(dirs []tuiDir, selected []bool, rsyncScript string) {
 	}
 	if !any {
 		fmt.Println("Nothing selected.")
-		return
+		return nil
 	}
 	sep := strings.Repeat("─", 60)
 	skipped := 0
 	always := false
+	ran := map[int]bool{}
 
 	for i, d := range dirs {
 		if !selected[i] {
@@ -832,7 +865,7 @@ func tuiRunSelected(dirs []tuiDir, selected []bool, rsyncScript string) {
 			fmt.Printf("Run? [y/a/N/q] ")
 			var resp [1]byte
 			os.Stdin.Read(resp[:])
-			// Drain the rest of the line (the \n the user typed after the key).
+			// Drain the rest of the line (\n left after single-key read).
 			var drain [256]byte
 			for {
 				n, _ := os.Stdin.Read(drain[:])
@@ -856,7 +889,10 @@ func tuiRunSelected(dirs []tuiDir, selected []bool, rsyncScript string) {
 				fmt.Println("\033[90mRunning all remaining...\033[0m")
 			case 'q', 'Q', 3:
 				fmt.Printf("Quit. (%d remaining skipped)\n", len(dirs)-i)
-				return
+				fmt.Printf("\n%s\nDone. %d skipped.\nPress Enter to return to TUI...", sep, skipped)
+				var b [256]byte
+				os.Stdin.Read(b[:])
+				return ran
 			default:
 				skipped++
 				fmt.Println("\033[90mSkipped.\033[0m")
@@ -864,17 +900,19 @@ func tuiRunSelected(dirs []tuiDir, selected []bool, rsyncScript string) {
 		}
 
 		if run {
+			ran[i] = true
 			cmd := exec.Command(rsyncScript, d.dir)
 			cmd.Stdout = os.Stdout
 			cmd.Stderr = os.Stderr
-			// No stdin — rsync doesn't need it and passing os.Stdin
-			// causes it to consume buffered input, skipping the next prompt.
 			if err := cmd.Run(); err != nil {
 				fmt.Fprintf(os.Stderr, "\033[31mrsync failed:\033[0m %v\n", err)
 			}
 		}
 	}
-	fmt.Printf("\n%s\nDone. %d skipped.\n", sep, skipped)
+	fmt.Printf("\n%s\nDone. %d skipped.\nPress Enter to return to TUI...", sep, skipped)
+	var b [256]byte
+	os.Stdin.Read(b[:])
+	return ran
 }
 
 // filterIgnored removes entries from result.Missing whose filename matches any
