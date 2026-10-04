@@ -223,6 +223,7 @@ func cmdCompare(args []string) {
 	doHash := fs.Bool("hash", false, "also compare hashes (both indexes must have hashes)")
 	doFuzzy := fs.Bool("fuzzy", false, "fuzzy name match: treat dest file as found if src name is substring of dest name")
 	doTUI := fs.Bool("tui", false, "interactive TUI to select and run rsync for missing dirs")
+	rsyncScript := fs.String("rsync-script", "", "script to run for each selected dir (default: ~/rsync.sh)")
 	ignoreFlag := fs.String("ignore", "", "comma-separated filename globs to exclude from missing (e.g. 'RARBG*,www.*.mp4')")
 	destFlag := fs.String("dest", "", "destination index (required when passing multiple sources)")
 
@@ -255,7 +256,7 @@ func cmdCompare(args []string) {
 	result := compare(src, dst, *doHash, *doFuzzy)
 	filterIgnored(result, *ignoreFlag)
 	if *doTUI {
-		runTUI(result)
+		runTUI(result, resolveRsyncScript(*rsyncScript))
 	} else {
 		printReport(result, src, dst, *format)
 	}
@@ -269,6 +270,7 @@ func cmdSyncCheck(args []string) {
 	doHash := fs.Bool("hash", false, "compute and compare hashes")
 	doFuzzy := fs.Bool("fuzzy", false, "fuzzy name match: treat dest file as found if src name is substring of dest name")
 	doTUI := fs.Bool("tui", false, "interactive TUI to select and run rsync for missing dirs")
+	rsyncScript := fs.String("rsync-script", "", "script to run for each selected dir (default: ~/rsync.sh)")
 	ignoreFlag := fs.String("ignore", "", "comma-separated filename globs to exclude from missing (e.g. 'RARBG*,www.*.mp4')")
 	format := fs.String("format", "text", "output format: text, json, html")
 	workers := fs.Int("workers", 8, "parallel scan workers")
@@ -321,7 +323,7 @@ func cmdSyncCheck(args []string) {
 	result := compare(src, dst, *doHash, *doFuzzy)
 	filterIgnored(result, *ignoreFlag)
 	if *doTUI {
-		runTUI(result)
+		runTUI(result, resolveRsyncScript(*rsyncScript))
 	} else {
 		printReport(result, src, dst, *format)
 	}
@@ -546,6 +548,18 @@ func compare(src, dst *Index, useHash bool, fuzzy bool) *CompareResult {
 	return result
 }
 
+// resolveRsyncScript returns the script path to use, expanding ~ if present.
+// If empty, defaults to ~/rsync.sh.
+func resolveRsyncScript(s string) string {
+	if s == "" {
+		s = "~/rsync.sh"
+	}
+	if strings.HasPrefix(s, "~/") {
+		s = filepath.Join(os.Getenv("HOME"), s[2:])
+	}
+	return s
+}
+
 // ---------- TUI ----------
 
 type tuiDir struct {
@@ -579,7 +593,7 @@ func buildTUIDirs(missing []FileRecord) []tuiDir {
 	return dirs
 }
 
-func runTUI(result *CompareResult) {
+func runTUI(result *CompareResult, rsyncScript string) {
 	if len(result.Missing) == 0 {
 		fmt.Fprintln(os.Stderr, "No missing files.")
 		return
@@ -703,13 +717,13 @@ func runTUI(result *CompareResult) {
 		case b == '\r' || b == '\n':
 			restore()
 			fmt.Print("\033[H\033[2J")
-			tuiRunSelected(dirs, selected)
+			tuiRunSelected(dirs, selected, rsyncScript)
 			return
 		}
 	}
 }
 
-func tuiRunSelected(dirs []tuiDir, selected []bool) {
+func tuiRunSelected(dirs []tuiDir, selected []bool, rsyncScript string) {
 	any := false
 	for _, s := range selected {
 		if s {
@@ -721,8 +735,6 @@ func tuiRunSelected(dirs []tuiDir, selected []bool) {
 		fmt.Println("Nothing selected.")
 		return
 	}
-
-	rsyncScript := filepath.Join(os.Getenv("HOME"), "rsync.sh")
 	sep := strings.Repeat("─", 60)
 	skipped := 0
 
@@ -731,7 +743,7 @@ func tuiRunSelected(dirs []tuiDir, selected []bool) {
 			continue
 		}
 		fmt.Printf("\n%s\n\033[1;33m%s\033[0m\n", sep, d.dir)
-		fmt.Printf("\033[90m~/rsync.sh %q\033[0m\n", d.dir)
+		fmt.Printf("\033[90m%s %q\033[0m\n", rsyncScript, d.dir)
 		fmt.Printf("Run? [y/N/q] ")
 
 		var resp [1]byte
