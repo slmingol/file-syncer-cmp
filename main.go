@@ -632,15 +632,16 @@ func runTUI(result *CompareResult) {
 				cc = "\033[32m"
 			}
 			label := d.dir
-			maxLabel := termW - 12
+			maxLabel := termW - 14
 			if len(label) > maxLabel {
 				label = "…" + label[len(label)-maxLabel+1:]
 			}
-			line := fmt.Sprintf(" %s%s\033[0m %s  \033[90m(%d)\033[0m", cc, check, label, d.count)
 			if i == cursor {
-				fmt.Fprintf(out, "\033[7m%s\033[0m\r\n", line)
+				// Subtle blue-gray bg, bold label, cyan arrow prefix.
+				fmt.Fprintf(out, "\033[48;5;237m\033[1m\033[36m▶ \033[0m\033[48;5;237m%s%s\033[0m\033[48;5;237m %s  \033[90m(%d)\033[0m\r\n",
+					cc, check, label, d.count)
 			} else {
-				fmt.Fprintf(out, "%s\r\n", line)
+				fmt.Fprintf(out, "  %s%s\033[0m %s  \033[90m(%d)\033[0m\r\n", cc, check, label, d.count)
 			}
 		}
 
