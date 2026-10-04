@@ -176,6 +176,7 @@ func cmdScan(args []string) {
 	extList := fs.String("ext", "", "comma-separated extensions (default: media files)")
 	doHash := fs.Bool("hash", false, "compute partial file hash (slower)")
 	workers := fs.Int("workers", 8, "parallel scan workers")
+	incremental := fs.Bool("incremental", false, "reuse unchanged dirs from previous --output index")
 
 	flagArgs, posArgs := splitArgs(args)
 	fs.Parse(flagArgs)
@@ -187,10 +188,34 @@ func cmdScan(args []string) {
 
 	exts := parseExts(*extList)
 
+	// Load existing index for incremental mode (only works with --output).
+	var baseIndex *Index
+	if *incremental && *output != "" {
+		if data, err := os.ReadFile(*output); err == nil {
+			var old Index
+			if json.Unmarshal(data, &old) == nil {
+				baseIndex = &old
+				fmt.Fprintf(os.Stderr, "incremental: base index from %s (%d files, scanned %s)\n",
+					*output, len(old.Files), old.ScannedAt.Format("2006-01-02 15:04"))
+			}
+		}
+	}
+
 	var indexes []*Index
 	for _, root := range posArgs {
 		fmt.Fprintf(os.Stderr, "scanning %s ...\n", root)
-		idx, err := scan(root, exts, *doHash, *workers)
+		// For multi-root incremental, filter base to this root only.
+		var base *Index
+		if baseIndex != nil {
+			var kept []FileRecord
+			for _, f := range baseIndex.Files {
+				if f.SourceIndex == root || baseIndex.Root == root {
+					kept = append(kept, f)
+				}
+			}
+			base = &Index{Root: root, ScannedAt: baseIndex.ScannedAt, Files: kept}
+		}
+		idx, err := scanWithBase(root, exts, *doHash, *workers, base)
 		if err != nil {
 			fatal(err)
 		}
@@ -345,9 +370,24 @@ func cmdSyncCheck(args []string) {
 // ---------- scan implementation ----------
 
 func scan(root string, exts map[string]bool, doHash bool, workers int) (*Index, error) {
+	return scanWithBase(root, exts, doHash, workers, nil)
+}
+
+func scanWithBase(root string, exts map[string]bool, doHash bool, workers int, base *Index) (*Index, error) {
+	// Build per-dir lookup from old index for incremental mode.
 	type job struct {
 		path string
 		info os.FileInfo
+	}
+
+	var lastScan time.Time
+	oldByDir := map[string][]FileRecord{} // rel dir → records
+	if base != nil {
+		lastScan = base.ScannedAt
+		for _, f := range base.Files {
+			d := filepath.Dir(f.Path)
+			oldByDir[d] = append(oldByDir[d], f)
+		}
 	}
 
 	jobs := make(chan job, 256)
@@ -379,9 +419,31 @@ func scan(root string, exts map[string]bool, doHash bool, workers int) (*Index, 
 		close(results)
 	}()
 
+	// reused holds records copied from the old index without rescanning.
+	var reusedMu sync.Mutex
+	var reused []FileRecord
+	skippedDirs := 0
+
 	go func() {
 		filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-			if err != nil || info.IsDir() {
+			if err != nil {
+				return nil
+			}
+			if info.IsDir() {
+				if base == nil {
+					return nil
+				}
+				// Skip rescanning this dir if it hasn't changed since last scan.
+				if info.ModTime().Before(lastScan) {
+					rel, _ := filepath.Rel(root, path)
+					if old, ok := oldByDir[rel]; ok {
+						reusedMu.Lock()
+						reused = append(reused, old...)
+						skippedDirs++
+						reusedMu.Unlock()
+						return filepath.SkipDir
+					}
+				}
 				return nil
 			}
 			ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(info.Name()), "."))
@@ -397,6 +459,12 @@ func scan(root string, exts map[string]bool, doHash bool, workers int) (*Index, 
 	var files []FileRecord
 	for r := range results {
 		files = append(files, r)
+	}
+	files = append(files, reused...)
+
+	if base != nil && skippedDirs > 0 {
+		fmt.Fprintf(os.Stderr, "incremental: skipped %d unchanged dirs, rescanned %d files\n",
+			skippedDirs, len(files)-len(reused))
 	}
 
 	sort.Slice(files, func(i, j int) bool {
