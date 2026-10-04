@@ -1084,15 +1084,15 @@ func runRsyncHUD(items []runItem, rsyncScript string, inputCh <-chan []byte) map
 
 	type hudState struct {
 		dirIdx    int
-		dirTotal  int
 		dirPath   string
 		completed []string
 		inFlight  string
 		allDone   bool
 		aborted   bool
+		doneIdx   map[int]bool // which items are fully done
 	}
 	var mu sync.Mutex
-	hs := hudState{dirTotal: len(items), dirIdx: -1}
+	hs := hudState{dirIdx: -1, doneIdx: map[int]bool{}}
 
 	type rsyncEv struct {
 		setDirIdx int
@@ -1152,6 +1152,9 @@ func runRsyncHUD(items []runItem, rsyncScript string, inputCh <-chan []byte) map
 			for _, idx := range item.indices {
 				ran[idx] = true
 			}
+			mu.Lock()
+			hs.doneIdx[i] = true
+			mu.Unlock()
 		}
 	}()
 
@@ -1163,11 +1166,13 @@ func runRsyncHUD(items []runItem, rsyncScript string, inputCh <-chan []byte) map
 		if termW < 40 {
 			termW = 80
 		}
-		if termH < 8 {
+		if termH < 10 {
 			termH = 24
 		}
 		rule := strings.Repeat("┄", termW-4)
 		fmt.Fprint(os.Stdout, "\033[H\033[2J")
+
+		// ── header ──
 		fmt.Fprintf(os.Stdout, "\033[90m  %s\033[0m\r\n", rule)
 		statusLabel := "\033[1;36mrsyncing\033[0m"
 		if h.allDone {
@@ -1177,18 +1182,31 @@ func runRsyncHUD(items []runItem, rsyncScript string, inputCh <-chan []byte) map
 		}
 		dirLabel := ""
 		if h.dirIdx >= 0 {
-			dirLabel = fmt.Sprintf("  \033[90m[%d/%d]\033[0m", h.dirIdx+1, h.dirTotal)
+			dirLabel = fmt.Sprintf("  \033[90m[%d/%d]\033[0m", h.dirIdx+1, len(items))
 		}
 		fmt.Fprintf(os.Stdout, "  %s%s  \033[90m%s\033[0m\r\n",
 			statusLabel, dirLabel, truncateName(h.dirPath, termW-30))
 		fmt.Fprintf(os.Stdout, "\033[90m  %s\033[0m\r\n\r\n", rule)
-		maxFiles := termH - 10
-		if maxFiles < 1 {
-			maxFiles = 1
+
+		// ── file progress (top half) ──
+		// Reserve: 4 header rows + 1 blank + 1 separator + N queue rows + 1 blank + 1 hint
+		queueRows := len(items)
+		if queueRows > 6 {
+			queueRows = 6
 		}
+		fixedRows := 4 + 1 + 1 + queueRows + 1 + 1
+		fileRows := termH - fixedRows
+		if fileRows < 2 {
+			fileRows = 2
+		}
+		// Show last (fileRows-1) completed + in-flight on last row.
 		completed := h.completed
-		if len(completed) > maxFiles {
-			completed = completed[len(completed)-maxFiles:]
+		showCompleted := fileRows - 1
+		if h.inFlight == "" {
+			showCompleted = fileRows
+		}
+		if len(completed) > showCompleted {
+			completed = completed[len(completed)-showCompleted:]
 		}
 		for _, f := range completed {
 			fmt.Fprintf(os.Stdout, "  \033[32m✓\033[0m %s\r\n", f)
@@ -1196,6 +1214,30 @@ func runRsyncHUD(items []runItem, rsyncScript string, inputCh <-chan []byte) map
 		if h.inFlight != "" {
 			fmt.Fprintf(os.Stdout, "  \033[33m→\033[0m %s\r\n", h.inFlight)
 		}
+
+		// ── queue separator ──
+		fmt.Fprintf(os.Stdout, "\r\n\033[90m  %s\033[0m\r\n", rule)
+
+		// ── rsync queue ──
+		shown := 0
+		for i, it := range items {
+			if shown >= queueRows {
+				break
+			}
+			var prefix string
+			name := truncateName(filepath.Base(it.path), termW-8)
+			if h.doneIdx[i] {
+				prefix = "\033[32m✓\033[0m"
+			} else if i == h.dirIdx {
+				prefix = "\033[33m→\033[0m"
+			} else {
+				prefix = "\033[90m·\033[0m"
+			}
+			fmt.Fprintf(os.Stdout, "  %s \033[90m%s\033[0m\r\n", prefix, name)
+			shown++
+		}
+
+		// ── hint ──
 		fmt.Fprintf(os.Stdout, "\r\n")
 		if h.allDone || h.aborted {
 			fmt.Fprintf(os.Stdout, "\033[90m  press any key to return\033[0m\r\n")
