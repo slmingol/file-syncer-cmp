@@ -988,6 +988,11 @@ func runTUI(result *CompareResult, rsyncScript, rsyncSrcRoot, noSelect string) {
 			}
 			// Run rsync with in-TUI HUD (stays in raw mode).
 			ran := runRsyncHUD(items, rsyncScript, rsyncSrcRoot, inputCh)
+			// Drain buffered input accumulated while HUD was running so stray
+			// keypresses don't trigger TUI actions (e.g. 'a' selecting all).
+			for len(inputCh) > 0 {
+				<-inputCh
+			}
 			// Remove synced dirs; always reset selection after any HUD run.
 			var remaining []tuiDir
 			for i, d := range dirs {
