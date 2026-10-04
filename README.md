@@ -89,19 +89,21 @@ Scan output shows live file count during scanning, per-root timing, and a summar
 
 ---
 
-During each rsync the TUI shows a compact progress display instead of raw output:
+Pressing Enter stays in TUI raw mode and shows a full-screen rsync HUD:
 
 ```
-  → Law and Order SVU S20E07 Caretaker.mkv           [7/25]  (in flight)
+  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+  rsyncing  [2/5]  /mnt3/torrent-complete/Law and Order SVU Season 20...
+  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+
+  ✓ Law & Order SVU S20E05 Accredo.mkv         [5/25]  9.9MB/s
+  ✓ Law & Order SVU S20E06 Exile.mkv           [6/25]  9.3MB/s
+  → Law & Order SVU S20E07 Caretaker.mkv
+
+  q abort
 ```
 
-Completed files print with `✓`, speed, and file index:
-
-```
-  ✓ Law and Order SVU S20E01 Man Up.mkv               [1/25]  10.0MB/s
-  ✓ Law and Order SVU S20E02 Man Down.mkv              [2/25]   9.9MB/s
-  → Law and Order SVU S20E03 Zero Tolerance.mkv        [3/25]
-```
+`[N/T]` shows rsync's xfr count / total. The denominator grows as rsync discovers the full file list incrementally — this is normal rsync behavior. Once done, the HUD shows `done` and waits for any key to return to the dir list.
 
 ---
 
