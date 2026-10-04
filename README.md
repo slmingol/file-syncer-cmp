@@ -200,6 +200,7 @@ Default extensions: `mp3 flac wav aac ogg opus m4a wma alac aiff mkv mp4 avi mov
 | `--ignore` | — | Comma-separated filename globs to drop from missing, e.g. `RARBG*,www.*` |
 | `--tui` | off | Launch interactive TUI instead of printing report |
 | `--rsync-script` | `~/rsync.sh` | Script called with each selected directory path |
+| `--rsync-src-root` | — | Source root for `rsync --relative` path anchoring. When set, the path passed to `--rsync-script` has `./` inserted after this prefix so rsync preserves the full subdirectory structure at the destination (e.g. `--rsync-src-root /mnt3/torrent-complete`) |
 
 ### `sync-check`
 

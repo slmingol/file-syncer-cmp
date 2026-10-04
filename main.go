@@ -342,6 +342,7 @@ func cmdCompare(args []string) {
 	doFuzzy := fs.Bool("fuzzy", false, "fuzzy name match: treat dest file as found if src name is substring of dest name")
 	doTUI := fs.Bool("tui", false, "interactive TUI to select and run rsync for missing dirs")
 	rsyncScript := fs.String("rsync-script", "", "script to run for each selected dir (default: ~/rsync.sh)")
+	rsyncSrcRoot := fs.String("rsync-src-root", "", "source root for rsync --relative path anchoring (e.g. /mnt3/torrent-complete)")
 	ignoreFlag := fs.String("ignore", "", "comma-separated filename globs to exclude from missing (e.g. 'RARBG*,www.*.mp4')")
 	noSelectFlag := fs.String("no-select", "*radarr*,*sonarr*", "comma-separated dir-name globs shown in TUI but not selectable")
 	destFlag := fs.String("dest", "", "destination index (required when passing multiple sources)")
@@ -379,7 +380,7 @@ func cmdCompare(args []string) {
 		time.Since(ct).Round(time.Millisecond),
 		fmtCount(len(result.Missing)), fmtCount(len(result.FuzzyMatch)), fmtCount(len(result.SizeMismatch)))
 	if *doTUI {
-		runTUI(result, resolveRsyncScript(*rsyncScript), *noSelectFlag)
+		runTUI(result, resolveRsyncScript(*rsyncScript), *rsyncSrcRoot, *noSelectFlag)
 	} else {
 		printReport(result, src, dst, *format)
 	}
@@ -394,6 +395,7 @@ func cmdSyncCheck(args []string) {
 	doFuzzy := fs.Bool("fuzzy", false, "fuzzy name match: treat dest file as found if src name is substring of dest name")
 	doTUI := fs.Bool("tui", false, "interactive TUI to select and run rsync for missing dirs")
 	rsyncScript := fs.String("rsync-script", "", "script to run for each selected dir (default: ~/rsync.sh)")
+	rsyncSrcRoot := fs.String("rsync-src-root", "", "source root for rsync --relative path anchoring (e.g. /mnt3/torrent-complete)")
 	ignoreFlag := fs.String("ignore", "", "comma-separated filename globs to exclude from missing (e.g. 'RARBG*,www.*.mp4')")
 	noSelectFlag := fs.String("no-select", "*radarr*,*sonarr*", "comma-separated dir-name globs shown in TUI but not selectable")
 	format := fs.String("format", "text", "output format: text, json, html")
@@ -457,7 +459,7 @@ func cmdSyncCheck(args []string) {
 		time.Since(ct).Round(time.Millisecond),
 		fmtCount(len(result.Missing)), fmtCount(len(result.FuzzyMatch)), fmtCount(len(result.SizeMismatch)))
 	if *doTUI {
-		runTUI(result, resolveRsyncScript(*rsyncScript), *noSelectFlag)
+		runTUI(result, resolveRsyncScript(*rsyncScript), *rsyncSrcRoot, *noSelectFlag)
 	} else {
 		printReport(result, src, dst, *format)
 	}
@@ -814,7 +816,7 @@ func buildTUIDirs(missing []FileRecord) []tuiDir {
 	return dirs
 }
 
-func runTUI(result *CompareResult, rsyncScript string, noSelect string) {
+func runTUI(result *CompareResult, rsyncScript, rsyncSrcRoot, noSelect string) {
 	if len(result.Missing) == 0 {
 		fmt.Fprintln(os.Stderr, "No missing files.")
 		return
@@ -985,7 +987,7 @@ func runTUI(result *CompareResult, rsyncScript string, noSelect string) {
 				break
 			}
 			// Run rsync with in-TUI HUD (stays in raw mode).
-			ran := runRsyncHUD(items, rsyncScript, inputCh)
+			ran := runRsyncHUD(items, rsyncScript, rsyncSrcRoot, inputCh)
 			// Remove synced dirs; always reset selection after any HUD run.
 			var remaining []tuiDir
 			for i, d := range dirs {
@@ -1078,7 +1080,7 @@ func buildRsyncItems(dirs []tuiDir, selected []bool) []runItem {
 // runRsyncHUD runs rsync for each item and draws a live TUI progress screen.
 // inputCh is the shared raw-stdin channel from runTUI (stays in raw mode).
 // Returns the set of original dir indices that were synced.
-func runRsyncHUD(items []runItem, rsyncScript string, inputCh <-chan []byte) map[int]bool {
+func runRsyncHUD(items []runItem, rsyncScript, rsyncSrcRoot string, inputCh <-chan []byte) map[int]bool {
 	ran := map[int]bool{}
 	if len(items) == 0 {
 		return ran
@@ -1117,7 +1119,16 @@ func runRsyncHUD(items []runItem, rsyncScript string, inputCh <-chan []byte) map
 			default:
 			}
 			evCh <- rsyncEv{setDirIdx: i, setDir: item.path}
-			cmd := exec.CommandContext(ctx, rsyncScript, item.path)
+			srcArg := item.path
+			if rsyncSrcRoot != "" {
+				root := filepath.Clean(rsyncSrcRoot)
+				rel := strings.TrimPrefix(filepath.Clean(item.path), root)
+				if rel != filepath.Clean(item.path) {
+					// Insert ./ anchor so rsync --relative preserves subpath.
+					srcArg = root + "/." + rel
+				}
+			}
+			cmd := exec.CommandContext(ctx, rsyncScript, srcArg)
 			pr, pw := io.Pipe()
 			cmd.Stdout = pw
 			cmd.Stderr = io.Discard
