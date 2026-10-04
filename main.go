@@ -289,6 +289,7 @@ func cmdCompare(args []string) {
 	doTUI := fs.Bool("tui", false, "interactive TUI to select and run rsync for missing dirs")
 	rsyncScript := fs.String("rsync-script", "", "script to run for each selected dir (default: ~/rsync.sh)")
 	ignoreFlag := fs.String("ignore", "", "comma-separated filename globs to exclude from missing (e.g. 'RARBG*,www.*.mp4')")
+	noSelectFlag := fs.String("no-select", "*radarr*,*sonarr*", "comma-separated dir-name globs shown in TUI but not selectable")
 	destFlag := fs.String("dest", "", "destination index (required when passing multiple sources)")
 
 	flagArgs, posArgs := splitArgs(args)
@@ -324,7 +325,7 @@ func cmdCompare(args []string) {
 		time.Since(ct).Round(time.Millisecond),
 		len(result.Missing), len(result.FuzzyMatch), len(result.SizeMismatch))
 	if *doTUI {
-		runTUI(result, resolveRsyncScript(*rsyncScript))
+		runTUI(result, resolveRsyncScript(*rsyncScript), *noSelectFlag)
 	} else {
 		printReport(result, src, dst, *format)
 	}
@@ -340,6 +341,7 @@ func cmdSyncCheck(args []string) {
 	doTUI := fs.Bool("tui", false, "interactive TUI to select and run rsync for missing dirs")
 	rsyncScript := fs.String("rsync-script", "", "script to run for each selected dir (default: ~/rsync.sh)")
 	ignoreFlag := fs.String("ignore", "", "comma-separated filename globs to exclude from missing (e.g. 'RARBG*,www.*.mp4')")
+	noSelectFlag := fs.String("no-select", "*radarr*,*sonarr*", "comma-separated dir-name globs shown in TUI but not selectable")
 	format := fs.String("format", "text", "output format: text, json, html")
 	workers := fs.Int("workers", 8, "parallel scan workers")
 	destFlag := fs.String("dest", "", "destination path (required when passing multiple sources)")
@@ -399,7 +401,7 @@ func cmdSyncCheck(args []string) {
 		time.Since(ct).Round(time.Millisecond),
 		len(result.Missing), len(result.FuzzyMatch), len(result.SizeMismatch))
 	if *doTUI {
-		runTUI(result, resolveRsyncScript(*rsyncScript))
+		runTUI(result, resolveRsyncScript(*rsyncScript), *noSelectFlag)
 	} else {
 		printReport(result, src, dst, *format)
 	}
@@ -701,9 +703,10 @@ func resolveRsyncScript(s string) string {
 // ---------- TUI ----------
 
 type tuiDir struct {
-	disk  string
-	dir   string
-	count int
+	disk     string
+	dir      string
+	count    int
+	disabled bool // visible but not selectable (e.g. auto-managed dirs)
 }
 
 func buildTUIDirs(missing []FileRecord) []tuiDir {
@@ -752,13 +755,28 @@ func buildTUIDirs(missing []FileRecord) []tuiDir {
 	return dirs
 }
 
-func runTUI(result *CompareResult, rsyncScript string) {
+func runTUI(result *CompareResult, rsyncScript string, noSelect string) {
 	if len(result.Missing) == 0 {
 		fmt.Fprintln(os.Stderr, "No missing files.")
 		return
 	}
 
 	dirs := buildTUIDirs(result.Missing)
+
+	// Mark dirs whose base name matches any --no-select glob as disabled.
+	if noSelect != "" {
+		patterns := strings.Split(noSelect, ",")
+		for i, d := range dirs {
+			base := filepath.Base(d.dir)
+			for _, pat := range patterns {
+				pat = strings.TrimSpace(pat)
+				if matched, _ := filepath.Match(strings.ToLower(pat), strings.ToLower(base)); matched {
+					dirs[i].disabled = true
+					break
+				}
+			}
+		}
+	}
 	selected := make([]bool, len(dirs))
 	cursor := 0
 	viewTop := 0
@@ -815,11 +833,16 @@ func runTUI(result *CompareResult, rsyncScript string) {
 		}
 		for i := viewTop; i < end; i++ {
 			d := dirs[i]
-			check := "[ ]"
-			cc := "\033[90m"
-			if selected[i] {
+			var check, cc string
+			if d.disabled {
+				check = "[-]"
+				cc = "\033[90m" // dim — not selectable
+			} else if selected[i] {
 				check = "[✓]"
 				cc = "\033[32m"
+			} else {
+				check = "[ ]"
+				cc = "\033[90m"
 			}
 			label := d.dir
 			maxLabel := termW - 14
@@ -853,10 +876,14 @@ func runTUI(result *CompareResult, rsyncScript string) {
 			fmt.Print("\033[H\033[2J")
 			return
 		case b == ' ':
-			selected[cursor] = !selected[cursor]
+			if !dirs[cursor].disabled {
+				selected[cursor] = !selected[cursor]
+			}
 		case b == 'a' || b == 'A':
 			for i := range selected {
-				selected[i] = true
+				if !dirs[i].disabled {
+					selected[i] = true
+				}
 			}
 		case b == 'n' || b == 'N':
 			for i := range selected {
