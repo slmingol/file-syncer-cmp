@@ -7,12 +7,15 @@ import (
 	"hash/fnv"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/term"
 )
 
 var version = "dev"
@@ -202,6 +205,7 @@ func cmdCompare(args []string) {
 	format := fs.String("format", "text", "output format: text, json, html")
 	doHash := fs.Bool("hash", false, "also compare hashes (both indexes must have hashes)")
 	doFuzzy := fs.Bool("fuzzy", false, "fuzzy name match: treat dest file as found if src name is substring of dest name")
+	doTUI := fs.Bool("tui", false, "interactive TUI to select and run rsync for missing dirs")
 	ignoreFlag := fs.String("ignore", "", "comma-separated filename globs to exclude from missing (e.g. 'RARBG*,www.*.mp4')")
 	destFlag := fs.String("dest", "", "destination index (required when passing multiple sources)")
 
@@ -213,7 +217,6 @@ func cmdCompare(args []string) {
 
 	switch {
 	case *destFlag != "":
-		// --dest nas.json disk1.json disk2.json ...
 		if len(posArgs) < 1 {
 			fmt.Fprintln(os.Stderr, "usage: compare --dest <dest.json> <src1.json> [src2.json ...]")
 			os.Exit(1)
@@ -223,7 +226,6 @@ func cmdCompare(args []string) {
 			srcIndexes = append(srcIndexes, loadIndex(p))
 		}
 	case len(posArgs) == 2:
-		// legacy: compare src.json dst.json
 		srcIndexes = []*Index{loadIndex(posArgs[0])}
 		dst = loadIndex(posArgs[1])
 	default:
@@ -235,7 +237,11 @@ func cmdCompare(args []string) {
 	src := mergeIndexes(srcIndexes)
 	result := compare(src, dst, *doHash, *doFuzzy)
 	filterIgnored(result, *ignoreFlag)
-	printReport(result, src, dst, *format)
+	if *doTUI {
+		runTUI(result)
+	} else {
+		printReport(result, src, dst, *format)
+	}
 }
 
 // ---------- sync-check ----------
@@ -245,6 +251,7 @@ func cmdSyncCheck(args []string) {
 	extList := fs.String("ext", "", "comma-separated extensions")
 	doHash := fs.Bool("hash", false, "compute and compare hashes")
 	doFuzzy := fs.Bool("fuzzy", false, "fuzzy name match: treat dest file as found if src name is substring of dest name")
+	doTUI := fs.Bool("tui", false, "interactive TUI to select and run rsync for missing dirs")
 	ignoreFlag := fs.String("ignore", "", "comma-separated filename globs to exclude from missing (e.g. 'RARBG*,www.*.mp4')")
 	format := fs.String("format", "text", "output format: text, json, html")
 	workers := fs.Int("workers", 8, "parallel scan workers")
@@ -296,7 +303,11 @@ func cmdSyncCheck(args []string) {
 	src := mergeIndexes(srcIndexes)
 	result := compare(src, dst, *doHash, *doFuzzy)
 	filterIgnored(result, *ignoreFlag)
-	printReport(result, src, dst, *format)
+	if *doTUI {
+		runTUI(result)
+	} else {
+		printReport(result, src, dst, *format)
+	}
 }
 
 // ---------- scan implementation ----------
@@ -516,6 +527,219 @@ func compare(src, dst *Index, useHash bool, fuzzy bool) *CompareResult {
 	}
 
 	return result
+}
+
+// ---------- TUI ----------
+
+type tuiDir struct {
+	disk  string
+	dir   string
+	count int
+}
+
+func buildTUIDirs(missing []FileRecord) []tuiDir {
+	type key struct{ disk, dir string }
+	var order []key
+	seen := map[key]bool{}
+	counts := map[key]int{}
+	for _, f := range missing {
+		root := f.SourceIndex
+		if root == "" {
+			root = "."
+		}
+		dir := filepath.Dir(filepath.Join(root, f.Path))
+		k := key{root, dir}
+		if !seen[k] {
+			seen[k] = true
+			order = append(order, k)
+		}
+		counts[k]++
+	}
+	dirs := make([]tuiDir, len(order))
+	for i, k := range order {
+		dirs[i] = tuiDir{disk: k.disk, dir: k.dir, count: counts[k]}
+	}
+	return dirs
+}
+
+func runTUI(result *CompareResult) {
+	if len(result.Missing) == 0 {
+		fmt.Fprintln(os.Stderr, "No missing files.")
+		return
+	}
+
+	dirs := buildTUIDirs(result.Missing)
+	selected := make([]bool, len(dirs))
+	cursor := 0
+	viewTop := 0
+
+	fd := int(os.Stdin.Fd())
+	oldState, err := term.MakeRaw(fd)
+	if err != nil {
+		fatal(fmt.Errorf("cannot enter raw mode: %w", err))
+	}
+	restore := func() { term.Restore(fd, oldState) }
+	defer restore()
+
+	out := os.Stdout
+	buf := make([]byte, 4)
+
+	draw := func() {
+		termW, termH, _ := term.GetSize(int(out.Fd()))
+		if termW < 40 {
+			termW = 80
+		}
+		if termH < 8 {
+			termH = 24
+		}
+		headerLines := 4
+		visible := termH - headerLines - 2
+		if visible < 1 {
+			visible = 1
+		}
+
+		// Scroll viewport to keep cursor visible.
+		if cursor < viewTop {
+			viewTop = cursor
+		}
+		if cursor >= viewTop+visible {
+			viewTop = cursor - visible + 1
+		}
+
+		fmt.Fprint(out, "\033[H\033[2J") // clear
+
+		nSel := 0
+		for _, s := range selected {
+			if s {
+				nSel++
+			}
+		}
+
+		fmt.Fprintf(out, "\033[1;36m File Sync TUI\033[0m  %d missing files · %d dirs · \033[33m%d selected\033[0m\r\n", len(result.Missing), len(dirs), nSel)
+		fmt.Fprintf(out, "\033[90m ↑↓ move · SPACE toggle · a=all  n=none · ENTER run · q quit\033[0m\r\n")
+		fmt.Fprintf(out, "\033[90m%s\033[0m\r\n", strings.Repeat("─", termW-1))
+
+		end := viewTop + visible
+		if end > len(dirs) {
+			end = len(dirs)
+		}
+		for i := viewTop; i < end; i++ {
+			d := dirs[i]
+			check := "[ ]"
+			cc := "\033[90m"
+			if selected[i] {
+				check = "[✓]"
+				cc = "\033[32m"
+			}
+			// Truncate dir to fit terminal width.
+			label := d.dir
+			suffix := fmt.Sprintf("  \033[90m(%d)\033[0m", d.count)
+			maxLabel := termW - 10
+			if len(label) > maxLabel {
+				label = "…" + label[len(label)-maxLabel+1:]
+			}
+			line := fmt.Sprintf(" %s%s\033[0m %s%s", cc, check, label, suffix)
+			if i == cursor {
+				fmt.Fprintf(out, "\033[7m %s%s\033[0m %s%s\033[0m\r\n", cc[len("\033["):], check, label, fmt.Sprintf("  (%d)", d.count))
+			} else {
+				fmt.Fprintf(out, "%s\r\n", line)
+			}
+		}
+
+		if len(dirs) > visible {
+			fmt.Fprintf(out, "\033[90m  [%d–%d of %d]\033[0m\r\n", viewTop+1, end, len(dirs))
+		}
+	}
+
+	for {
+		draw()
+		n, _ := os.Stdin.Read(buf)
+		if n == 0 {
+			continue
+		}
+		b := buf[0]
+		switch {
+		case b == 'q' || b == 'Q' || b == 3: // q / Ctrl-C
+			restore()
+			fmt.Print("\033[H\033[2J")
+			return
+		case b == ' ':
+			selected[cursor] = !selected[cursor]
+		case b == 'a' || b == 'A':
+			for i := range selected {
+				selected[i] = true
+			}
+		case b == 'n' || b == 'N':
+			for i := range selected {
+				selected[i] = false
+			}
+		case b == 0x1b && n >= 3 && buf[1] == '[':
+			switch buf[2] {
+			case 'A': // up
+				if cursor > 0 {
+					cursor--
+				}
+			case 'B': // down
+				if cursor < len(dirs)-1 {
+					cursor++
+				}
+			}
+		case b == '\r' || b == '\n':
+			restore()
+			fmt.Print("\033[H\033[2J")
+			tuiRunSelected(dirs, selected)
+			return
+		}
+	}
+}
+
+func tuiRunSelected(dirs []tuiDir, selected []bool) {
+	any := false
+	for _, s := range selected {
+		if s {
+			any = true
+			break
+		}
+	}
+	if !any {
+		fmt.Println("Nothing selected.")
+		return
+	}
+
+	rsyncScript := filepath.Join(os.Getenv("HOME"), "rsync.sh")
+	sep := strings.Repeat("─", 60)
+	skipped := 0
+
+	for i, d := range dirs {
+		if !selected[i] {
+			continue
+		}
+		fmt.Printf("\n%s\n\033[1;33m%s\033[0m\n", sep, d.dir)
+		fmt.Printf("\033[90m~/rsync.sh %q\033[0m\n", d.dir)
+		fmt.Printf("Run? [y/N/q] ")
+
+		var resp [1]byte
+		os.Stdin.Read(resp[:])
+		fmt.Println()
+
+		switch resp[0] {
+		case 'y', 'Y':
+			cmd := exec.Command(rsyncScript, d.dir)
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			cmd.Stdin = os.Stdin
+			if err := cmd.Run(); err != nil {
+				fmt.Fprintf(os.Stderr, "\033[31mrsync failed:\033[0m %v\n", err)
+			}
+		case 'q', 'Q', 3:
+			fmt.Printf("Quit. (%d remaining skipped)\n", len(dirs)-i)
+			return
+		default:
+			skipped++
+			fmt.Println("\033[90mSkipped.\033[0m")
+		}
+	}
+	fmt.Printf("\n%s\nDone. %d skipped.\n", sep, skipped)
 }
 
 // filterIgnored removes entries from result.Missing whose filename matches any
