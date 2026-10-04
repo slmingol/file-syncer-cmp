@@ -631,16 +631,14 @@ func runTUI(result *CompareResult) {
 				check = "[✓]"
 				cc = "\033[32m"
 			}
-			// Truncate dir to fit terminal width.
 			label := d.dir
-			suffix := fmt.Sprintf("  \033[90m(%d)\033[0m", d.count)
-			maxLabel := termW - 10
+			maxLabel := termW - 12
 			if len(label) > maxLabel {
 				label = "…" + label[len(label)-maxLabel+1:]
 			}
-			line := fmt.Sprintf(" %s%s\033[0m %s%s", cc, check, label, suffix)
+			line := fmt.Sprintf(" %s%s\033[0m %s  \033[90m(%d)\033[0m", cc, check, label, d.count)
 			if i == cursor {
-				fmt.Fprintf(out, "\033[7m %s%s\033[0m %s%s\033[0m\r\n", cc[len("\033["):], check, label, fmt.Sprintf("  (%d)", d.count))
+				fmt.Fprintf(out, "\033[7m%s\033[0m\r\n", line)
 			} else {
 				fmt.Fprintf(out, "%s\r\n", line)
 			}
