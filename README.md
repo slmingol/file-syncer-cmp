@@ -136,6 +136,12 @@ The dir list (TUI) shows file count and size per directory, and tracks total sel
   <img src="assets/screenshot-tui.svg" alt="TUI screenshot" width="900"/>
 </p>
 
+### Rsync HUD
+
+<p align="center">
+  <img src="assets/screenshot-hud.svg" alt="Rsync HUD screenshot" width="900"/>
+</p>
+
 Select which directories to sync, then confirm each one (or press `a` to run all):
 
 | Key | Action |

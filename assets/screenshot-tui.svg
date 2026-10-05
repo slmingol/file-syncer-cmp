@@ -1,13 +1,13 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="900" height="420" viewBox="0 0 900 420">
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="440" viewBox="0 0 900 440">
   <defs>
     <style>
-      text { font-family: 'SF Mono','Fira Code','Cascadia Code',ui-monospace,monospace; font-size: 13px; }
+      text { font-family: 'SF Mono','Fira Code','Cascadia Code',ui-monospace,monospace; font-size: 12.5px; }
     </style>
-    <clipPath id="inner"><rect x="8" y="8" width="884" height="404" rx="6"/></clipPath>
+    <clipPath id="inner"><rect x="8" y="8" width="884" height="424" rx="6"/></clipPath>
   </defs>
 
   <!-- outer shell -->
-  <rect width="900" height="420" rx="8" fill="#161b22"/>
+  <rect width="900" height="440" rx="8" fill="#161b22"/>
   <!-- terminal chrome bar -->
   <rect x="0" y="0" width="900" height="32" rx="8" fill="#1c2128"/>
   <rect x="0" y="24" width="900" height="8" fill="#1c2128"/>
@@ -15,93 +15,87 @@
   <circle cx="20" cy="16" r="6" fill="#ff5f57"/>
   <circle cx="40" cy="16" r="6" fill="#febc2e"/>
   <circle cx="60" cy="16" r="6" fill="#28c840"/>
-  <!-- title bar text -->
-  <text x="450" y="20" text-anchor="middle" fill="#8b949e" font-size="12">file-syncer-cmp — sync-check --tui</text>
+  <text x="450" y="20" text-anchor="middle" fill="#8b949e" font-size="12">file-syncer-cmp compare --dest nas.json mnt3.json mnt4.json --fuzzy --tui</text>
 
   <!-- terminal body -->
-  <rect x="0" y="32" width="900" height="388" fill="#0d1117" clip-path="url(#inner)"/>
+  <rect x="0" y="32" width="900" height="408" fill="#0d1117" clip-path="url(#inner)"/>
 
   <!-- header line -->
-  <text x="20" y="65" fill="#38bdf8" font-weight="bold">File Sync TUI</text>
-  <text x="147" y="65" fill="#e2e8f0">  842 missing files · 73 dirs ·</text>
-  <text x="490" y="65" fill="#4ade80"> 8 selected</text>
+  <text x="20" y="62" fill="#38bdf8" font-weight="bold"> File Sync TUI</text>
+  <text x="150" y="62" fill="#e2e8f0">  524 missing files · 24 dirs ·</text>
+  <text x="468" y="62" fill="#facc15"> 6 selected  18.4 GB</text>
 
   <!-- hint line -->
-  <text x="20" y="85" fill="#64748b">  ↑↓ move · SPACE toggle · a=all  n=none · ENTER run · q quit</text>
+  <text x="20" y="80" fill="#4b5563">  ↑↓ move · SPACE toggle · a=all  n=none · ENTER run · q quit</text>
 
   <!-- separator -->
-  <text x="20" y="105" fill="#64748b">────────────────────────────────────────────────────────────────────────────────</text>
+  <text x="20" y="96" fill="#374151">────────────────────────────────────────────────────────────────────────────────</text>
 
-  <!-- Row 1: unselected -->
-  <text x="20" y="127" fill="#e2e8f0">  </text>
-  <text x="33" y="127" fill="#64748b">[ ]</text>
-  <text x="60" y="127" fill="#e2e8f0"> /mnt/media/Action.Movie.2023.1080p.BluRay.x264</text>
-  <text x="630" y="127" fill="#64748b">  (3)</text>
+  <!-- Row 1: disabled -->
+  <text x="20" y="116" fill="#4b5563">  [-] /mnt1/torrent-complete/radarr</text>
+  <text x="530" y="116" fill="#374151">  (1 · 4.2 MB)</text>
 
-  <!-- Row 2: selected -->
-  <text x="20" y="147" fill="#e2e8f0">  </text>
-  <text x="33" y="147" fill="#4ade80">[✓]</text>
-  <text x="60" y="147" fill="#e2e8f0"> /mnt/media/Classic.Drama.S01.COMPLETE.720p.WEBRip</text>
-  <text x="648" y="147" fill="#64748b">  (6)</text>
+  <!-- Row 2: disabled -->
+  <text x="20" y="134" fill="#4b5563">  [-] /mnt1/torrent-complete/tv-sonarr</text>
+  <text x="550" y="134" fill="#374151">  (4 · 12.1 MB)</text>
 
-  <!-- Row 3: cursor/highlighted -->
-  <rect x="0" y="153" width="900" height="22" fill="#1e2a3a"/>
-  <text x="20" y="169" fill="#38bdf8">▶ </text>
-  <text x="36" y="169" fill="#4ade80">[✓]</text>
-  <text x="63" y="169" fill="#e2e8f0" font-weight="bold"> /mnt/media/Documentary.Series.S02.720p.HDTV.x265</text>
-  <text x="660" y="169" fill="#64748b">  (14)</text>
+  <!-- Row 3: selected -->
+  <text x="20" y="152" fill="#4ade80">  [✓]</text>
+  <text x="62" y="152" fill="#e2e8f0"> /mnt3/torrent-complete/Murdoch Mysteries - Season 07 (2013-2014) - 18 HD Episodes</text>
+  <text x="700" y="152" fill="#4b5563">  (17 · 3.2 GB)</text>
 
-  <!-- Row 4: selected -->
-  <text x="20" y="193" fill="#e2e8f0">  </text>
-  <text x="33" y="193" fill="#4ade80">[✓]</text>
-  <text x="60" y="193" fill="#e2e8f0"> /mnt/media/Foreign.Film.2018.720p.BluRay.YTS</text>
-  <text x="602" y="193" fill="#64748b">  (2)</text>
+  <!-- Row 4: cursor/highlighted -->
+  <rect x="0" y="158" width="900" height="20" fill="#1e2a3a"/>
+  <text x="20" y="173" fill="#38bdf8">▶ </text>
+  <text x="34" y="173" fill="#4ade80">[✓]</text>
+  <text x="62" y="173" fill="#e2e8f0" font-weight="bold"> /mnt3/torrent-complete/Murdoch Mysteries Season 1 - 5/Season 1</text>
+  <text x="680" y="173" fill="#4b5563">  (13 · 2.8 GB)</text>
 
-  <!-- Row 5: unselected -->
-  <text x="20" y="213" fill="#e2e8f0">  </text>
-  <text x="33" y="213" fill="#64748b">[ ]</text>
-  <text x="60" y="213" fill="#e2e8f0"> /mnt/media/Miniseries.S01E01-E04.720p.AMZN.WEBRip</text>
-  <text x="645" y="213" fill="#64748b">  (4)</text>
+  <!-- Row 5: selected -->
+  <text x="20" y="191" fill="#4ade80">  [✓]</text>
+  <text x="62" y="191" fill="#e2e8f0"> /mnt3/torrent-complete/Murdoch Mysteries Season 1 - 5/Season 2</text>
+  <text x="680" y="191" fill="#4b5563">  (13 · 2.9 GB)</text>
 
-  <!-- Row 6: selected -->
-  <text x="20" y="233" fill="#e2e8f0">  </text>
-  <text x="33" y="233" fill="#4ade80">[✓]</text>
-  <text x="60" y="233" fill="#e2e8f0"> /mnt/media/Nature.Documentary.2021.1080p.NF.WEBRip</text>
-  <text x="648" y="233" fill="#64748b">  (2)</text>
+  <!-- Row 6: unselected -->
+  <text x="20" y="209" fill="#4b5563">  [ ] /mnt3/torrent-complete/Murdoch Mysteries Season 1 - 5/Season 3</text>
+  <text x="680" y="209" fill="#374151">  (13 · 2.7 GB)</text>
 
   <!-- Row 7: unselected -->
-  <text x="20" y="253" fill="#e2e8f0">  </text>
-  <text x="33" y="253" fill="#64748b">[ ]</text>
-  <text x="60" y="253" fill="#e2e8f0"> /mnt/media/SciFi.Series.S03.COMPLETE.1080p.ATVP.WEB</text>
-  <text x="650" y="253" fill="#64748b">  (10)</text>
+  <text x="20" y="227" fill="#4b5563">  [ ] /mnt3/torrent-complete/Murdoch Mysteries Season 11</text>
+  <text x="620" y="227" fill="#374151">  (1 · 802.4 MB)</text>
 
   <!-- Row 8: selected -->
-  <text x="20" y="273" fill="#e2e8f0">  </text>
-  <text x="33" y="273" fill="#4ade80">[✓]</text>
-  <text x="60" y="273" fill="#e2e8f0"> /mnt/media/Animated.Show.S04/S04E01.720p.HEVC.x265-Group</text>
-  <text x="700" y="273" fill="#64748b">  (8)</text>
+  <text x="20" y="245" fill="#4ade80">  [✓]</text>
+  <text x="62" y="245" fill="#e2e8f0"> /mnt3/torrent-complete/The Simpsons Season 29 1080p x264</text>
+  <text x="650" y="245" fill="#4b5563">  (22 · 9.1 GB)</text>
 
-  <!-- Row 9: selected -->
-  <text x="20" y="293" fill="#e2e8f0">  </text>
-  <text x="33" y="293" fill="#4ade80">[✓]</text>
-  <text x="60" y="293" fill="#e2e8f0"> /mnt/media/Animated.Show.S04/S04E02.720p.HEVC.x265-Group</text>
-  <text x="700" y="293" fill="#64748b">  (8)</text>
+  <!-- Row 9: unselected -->
+  <text x="20" y="263" fill="#4b5563">  [ ] /mnt4/torrent-complete/Ed 2000 Season 4 Complete x264 [i_c]</text>
+  <text x="670" y="263" fill="#374151">  (13 · 1.6 GB)</text>
 
-  <!-- Row 10: unselected -->
-  <text x="20" y="313" fill="#e2e8f0">  </text>
-  <text x="33" y="313" fill="#64748b">[ ]</text>
-  <text x="60" y="313" fill="#e2e8f0"> /mnt/media/Thriller.Movie.2019.720p.WEBRip.x264-ETRG</text>
-  <text x="650" y="313" fill="#64748b">  (1)</text>
+  <!-- Row 10: selected -->
+  <text x="20" y="281" fill="#4ade80">  [✓]</text>
+  <text x="62" y="281" fill="#e2e8f0"> /mnt4/torrent-complete/The Drew Carey Show/The Drew Carey Show - Season 1</text>
+  <text x="700" y="281" fill="#4b5563">  (22 · 4.1 GB)</text>
+
+  <!-- Row 11: selected -->
+  <text x="20" y="299" fill="#4ade80">  [✓]</text>
+  <text x="62" y="299" fill="#e2e8f0"> /mnt4/torrent-complete/The Drew Carey Show/The Drew Carey Show - Season 2</text>
+  <text x="700" y="299" fill="#4b5563">  (24 · 4.4 GB)</text>
+
+  <!-- Row 12: unselected -->
+  <text x="20" y="317" fill="#4b5563">  [ ] /mnt4/torrent-complete/The Drew Carey Show/The Drew Carey Show - Season 3</text>
+  <text x="700" y="317" fill="#374151">  (28 · 5.2 GB)</text>
 
   <!-- bottom separator -->
-  <text x="20" y="340" fill="#64748b">────────────────────────────────────────────────────────────────────────────────</text>
+  <text x="20" y="344" fill="#374151">────────────────────────────────────────────────────────────────────────────────</text>
 
   <!-- pagination -->
-  <text x="20" y="360" fill="#64748b">  [1-10 of 150]</text>
+  <text x="20" y="362" fill="#4b5563">  [1–12 of 24]</text>
 
   <!-- cursor blink -->
-  <rect x="20" y="372" width="8" height="14" fill="#e2e8f0" opacity="0.7"/>
+  <rect x="20" y="374" width="7" height="13" fill="#e2e8f0" opacity="0.7"/>
 
   <!-- border -->
-  <rect x="0.5" y="0.5" width="899" height="419" rx="7.5" fill="none" stroke="#30363d" stroke-width="1"/>
+  <rect x="0.5" y="0.5" width="899" height="439" rx="7.5" fill="none" stroke="#30363d" stroke-width="1"/>
 </svg>
