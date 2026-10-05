@@ -153,14 +153,12 @@ Select which directories to sync, then confirm each one (or press `a` to run all
 | `Enter` | Run rsync for selected dirs |
 | `q` | Quit |
 
-At the rsync prompt:
+In the HUD:
 
 | Key | Action |
 |---|---|
-| `y` | Run this dir |
-| `a` | Run this and all remaining without prompting |
-| `N` | Skip this dir |
-| `q` | Quit |
+| `q` | Abort all remaining |
+| any key | Return to dir list (when done) |
 
 ---
 
