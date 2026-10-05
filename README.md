@@ -103,19 +103,19 @@ Pressing Enter stays in TUI raw mode and shows a full-screen rsync HUD:
 
 ```
   ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
-  rsyncing  [2/5]  /mnt3/torrent-complete/Law and Order SVU Season 20...
+  rsyncing  [2/5]  /mnt2/downloads/Drama.Series.Collection/Season.2
   files 6/25  ·  9.9MB/s  ·  elapsed 0:42
   ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
 
-  ✓ Law & Order SVU S20E05 Accredo.mkv         [5/25]  9.9MB/s
-  ✓ Law & Order SVU S20E06 Exile.mkv           [6/25]  9.3MB/s
-  → Law & Order SVU S20E07 Caretaker.mkv
+  ✓ Drama.Series.S02E05.1080p.HDTV.x264.mkv    [5/25]  9.9MB/s
+  ✓ Drama.Series.S02E06.1080p.HDTV.x264.mkv    [6/25]  9.3MB/s
+  → Drama.Series.S02E07.1080p.HDTV.x264.mkv
 
   ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
-  ✓ Law and Order SVU Season 19
-  → Law and Order SVU Season 20...
-  · Law and Order SVU Season 21
-  · Law and Order SVU Season 22
+  ✓ Drama.Series.S07.1080p.HDTV.x264
+  → Drama.Series.Collection/Season.2
+  · Drama.Series.Collection/Season.3
+  · Animated.Series.S29.1080p.x264
 
   q abort
 ```
@@ -226,7 +226,7 @@ Default extensions: `mp3 flac wav aac ogg opus m4a wma alac aiff mkv mp4 avi mov
 | `--format` | `text` | Output format: `text`, `json`, `html` |
 | `--hash` | off | Compare hashes (both indexes must include hashes) |
 | `--fuzzy` | off | Match renamed/renumbered files (substring + episode-strip) |
-| `--ignore` | — | Comma-separated filename globs to drop from missing, e.g. `RARBG*,www.*` |
+| `--ignore` | — | Comma-separated filename globs to drop from missing, e.g. `RARBG*,www.*`. `ExtraTorrentRG*` is always filtered (built-in). |
 | `--tui` | off | Launch interactive TUI instead of printing report |
 | `--rsync-script` | `~/rsync.sh` | Script called with each selected directory path |
 | `--rsync-src-root` | — | Override the source root used when invoking `--rsync-script`. Normally auto-detected from the scan index. |
