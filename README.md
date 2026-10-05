@@ -104,16 +104,29 @@ Pressing Enter stays in TUI raw mode and shows a full-screen rsync HUD:
 ```
   ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
   rsyncing  [2/5]  /mnt3/torrent-complete/Law and Order SVU Season 20...
+  files 6/25  ·  9.9MB/s  ·  elapsed 0:42
   ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
 
   ✓ Law & Order SVU S20E05 Accredo.mkv         [5/25]  9.9MB/s
   ✓ Law & Order SVU S20E06 Exile.mkv           [6/25]  9.3MB/s
   → Law & Order SVU S20E07 Caretaker.mkv
 
+  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+  ✓ Law and Order SVU Season 19
+  → Law and Order SVU Season 20...
+  · Law and Order SVU Season 21
+  · Law and Order SVU Season 22
+
   q abort
 ```
 
-`[N/T]` shows rsync's xfr count / total. The denominator grows as rsync discovers the full file list incrementally — this is normal rsync behavior. Once done, the HUD shows `done` and waits for any key to return to the dir list.
+The stats line (`files N/T · speed · elapsed`) updates live as rsync emits progress and resets between items. `[N/T]` in the file list shows rsync's xfr count / total — the denominator grows as rsync discovers the file list incrementally. Once done, the HUD shows `done` and waits for any key to return to the dir list.
+
+The dir list (TUI) shows file count and size per directory, and tracks total selected size in the header:
+
+```
+ File Sync TUI  524 missing files · 24 dirs · 6 selected  14.2 GB
+```
 
 ---
 
