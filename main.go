@@ -1410,22 +1410,29 @@ func runRsyncHUD(items []runItem, rsyncScript, rsyncSrcRoot string, inputCh <-ch
 	}
 }
 
+// builtinIgnore are always-on filename glob patterns (case-insensitive).
+var builtinIgnore = []string{
+	"extratorrentrg*",
+}
+
 // filterIgnored removes entries from result.Missing whose filename matches any
 // of the comma-separated glob patterns in the ignore string. Non-glob patterns
 // are treated as exact filename matches. Case-insensitive.
 func filterIgnored(result *CompareResult, ignore string) {
-	if ignore == "" {
-		return
+	patterns := append([]string(nil), builtinIgnore...)
+	for _, p := range strings.Split(ignore, ",") {
+		if p = strings.ToLower(strings.TrimSpace(p)); p != "" {
+			patterns = append(patterns, p)
+		}
 	}
-	patterns := strings.Split(ignore, ",")
-	for i, p := range patterns {
-		patterns[i] = strings.ToLower(strings.TrimSpace(p))
+	if len(patterns) == 0 {
+		return
 	}
 
 	keep := result.Missing[:0]
 	for _, f := range result.Missing {
 		nameLow := strings.ToLower(f.Name)
-		matched := false
+		var matched bool
 		for _, p := range patterns {
 			if ok, _ := filepath.Match(p, nameLow); ok {
 				matched = true
